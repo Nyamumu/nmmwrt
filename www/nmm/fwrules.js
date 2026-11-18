@@ -7,6 +7,8 @@ const RULE_TARGET_TEXT = { ACCEPT: '허용', REJECT: '거부', DROP: '버림', N
 const RULE_PROTOS = [['tcp', 'TCP'], ['udp', 'UDP'], ['icmp', 'ICMP'], ['igmp', 'IGMP'], ['esp', 'IPSec ESP'], ['ah', 'IPSec AH'], ['all', '모든 프로토콜']];
 const RULE_FAMILY = [['', 'IPv4 + IPv6'], ['ipv4', 'IPv4'], ['ipv6', 'IPv6']];
 const LIMIT_UNIT = { sec: '초', second: '초', min: '분', minute: '분', hour: '시간', day: '일' };
+const RULE_SET_MODES = [['', '세트에 있는 항목에 적용'], ['!', '세트에 없는 항목에 적용']];
+const RULE_SET_DIRS = [['', '세트에 정한 방향'], ['src', '출발 쪽과 비교'], ['dest', '도착 쪽과 비교']];
 
 const ruleList = (v) => asList(v).join(' ');
 
@@ -27,7 +29,7 @@ function ruleDirection(r) {
 }
 
 // 표의 '조건' 칸
-function ruleMatch(r) {
+function ruleMatch(r, sets) {
   const [, dirText] = ruleDirection(r);
   const fam = { ipv4: 'IPv4', ipv6: 'IPv6' }[String(r.family || '').toLowerCase()] || 'IPv4·IPv6';
   const protos = ruleProtos(r);
@@ -41,6 +43,16 @@ function ruleMatch(r) {
     h('div', null, '도착 ', zone(r.dest, '이 공유기'),
       extra([['IP', ruleList(r.dest_ip)], ['포트', ruleList(r.dest_port)]])),
   ];
+  for (const v of ipsetRefList(r.ipset)) {
+    const ref = ipsetRef(v);
+    if (!ref) continue;
+    const set = sets.find((s) => s.name === ref.name);
+    // fw4는 없거나 꺼진 세트를 쓰는 규칙을 통째로 적용하지 않는다
+    const broken = !set || set.enabled === '0';
+    const dirText = { src: ' · 출발', dest: ' · 도착' }[ref.dir] || '';
+    lines.push(h('div', null, `IP 세트 ${ref.neg ? '제외 ' : ''}`, h('span', { class: 'ms-chip' }, ref.name), dirText,
+      broken ? [' ', h('span', { class: 'pill bad' }, set ? '세트 꺼짐 · 규칙 미적용' : '세트 없음 · 규칙 미적용')] : null));
+  }
   if (r.icmp_type) lines.push(h('div', { class: 'muted' }, `ICMP 종류: ${ruleList(r.icmp_type)}`));
   const lim = /^(\d+)\/(\w+)$/.exec(r.limit || '');
   if (lim) lines.push(h('div', { class: 'muted' }, `${LIMIT_UNIT[lim[2]] || lim[2]}당 ${lim[1]}개까지`));
@@ -64,7 +76,11 @@ function trafficRulesPage(root) {
     }
     if (!alive) return;
     if (!fw) { body.replaceChildren(messageCard('방화벽 설정(firewall)을 찾을 수 없습니다.')); return; }
-    const ctx = { rules: fw.filter((s) => s['.type'] === 'rule'), zones: fw.filter((s) => s['.type'] === 'zone' && s.name).map((s) => s.name) };
+    const ctx = {
+      rules: fw.filter((s) => s['.type'] === 'rule'),
+      zones: fw.filter((s) => s['.type'] === 'zone' && s.name).map((s) => s.name),
+      sets: fw.filter((s) => s['.type'] === 'ipset' && s.name),
+    };
     render(ctx);
   }
 
@@ -81,7 +97,7 @@ function trafficRulesPage(root) {
       const t = String(r.target || 'DROP').toUpperCase();
       return h('tr', { class: on ? '' : 'row-off' },
         h('td', null, h('b', null, r.name || '(이름 없음)')),
-        h('td', null, ruleMatch(r)),
+        h('td', null, ruleMatch(r, ctx.sets)),
         h('td', null, h('span', { class: 'pill ' + (t === 'ACCEPT' ? 'ok' : t === 'REJECT' || t === 'DROP' ? 'bad' : 'off') }, RULE_TARGET_TEXT[t] || t),
           h('div', { class: 'muted' }, dir)),
         h('td', null, h('span', { class: 'pill ' + (on ? 'ok' : 'off') }, on ? '사용' : '꺼짐')),
@@ -128,6 +144,13 @@ function trafficRulesPage(root) {
     const destPort = text(ruleList(cur.dest_port), '예: 22 또는 8000-8100');
     const target = selectEl(RULE_TARGETS, String(cur.target || 'DROP').toUpperCase());
     const limit = text(cur.limit, '예: 10/sec');
+    // 세트를 여러 개 쓰는 규칙은 이 화면에서 바꾸지 않고 그대로 둔다
+    const setRefs = ipsetRefList(cur.ipset);
+    const setEditable = setRefs.length <= 1;
+    const setRef = setRefs.length === 1 ? ipsetRef(setRefs[0]) : null;
+    const setSel = selectEl([['', '사용 안 함'], ...ctx.sets.map((s) => [s.name, s.enabled === '0' ? `${s.name} (꺼짐)` : s.name])], setRef ? setRef.name : '');
+    const setMode = selectEl(RULE_SET_MODES, setRef && setRef.neg ? '!' : '');
+    const setDir = selectEl(RULE_SET_DIRS, setRef ? setRef.dir : '');
     const enabled = toggleEl(cur.enabled !== '0', '이 규칙 사용');
     const f = {
       name: formField('이름', name),
@@ -142,7 +165,14 @@ function trafficRulesPage(root) {
       destPort: formField('도착 포트', destPort),
       target: formField('동작', target),
       limit: formField('횟수 제한', limit, '단위: sec, minute, hour, day'),
+      set: formField('IP 세트', setSel, ctx.sets.length ? '' : 'NAT/라우터 관리 > IP 세트에서 먼저 만드세요'),
+      setMode: formField('세트 조건', setMode),
+      setDir: formField('비교 방향', setDir),
     };
+    const setOptions = h('div', { class: 'fieldset' }, f.setMode.el, f.setDir.el);
+    const syncSet = () => { setOptions.hidden = !setSel.value; };
+    setSel.addEventListener('change', syncSet);
+    syncSet();
     const err = h('p', { class: 'msg', hidden: true });
 
     const tokens = (s) => s.trim().split(/\s+/).filter(Boolean);
@@ -171,10 +201,23 @@ function trafficRulesPage(root) {
       if (limit.value.trim() && !/^\d+\/(sec|second|min|minute|hour|day)$/.test(limit.value.trim())) { f.limit.setError('예: 10/sec'); bad = true; }
       if (!src.value && !dest.value) { err.textContent = '출발과 도착이 모두 "이 공유기"일 수는 없습니다.'; err.hidden = false; bad = true; }
       if (protos.includes('all') && protos.length > 1) { proto.setError('"모든 프로토콜"은 다른 것과 함께 고를 수 없습니다'); bad = true; }
+      // fw4가 규칙을 통째로 건너뛰는 조합은 미리 막는다
+      const chosenSet = setEditable ? ctx.sets.find((s) => s.name === setSel.value) : null;
+      if (chosenSet) {
+        const setFields = ipsetFields(chosenSet);
+        const setFam = ipsetFamily(chosenSet);
+        const dirs = setDir.value ? setDir.value.split(/\s+/) : [];
+        if (chosenSet.enabled === '0') { f.set.setError('꺼진 세트를 쓰면 이 규칙이 적용되지 않습니다. 세트를 먼저 켜 주세요'); bad = true; }
+        else if (setFields.some((x, i) => x.type === 'mac' && (dirs[i] || x.dir) !== 'src')) { f.setDir.setError('MAC 주소는 출발 쪽만 비교할 수 있습니다'); bad = true; }
+        else if (setFields.some((x) => x.type === 'port') && protos.some((p) => p !== 'tcp' && p !== 'udp')) { f.set.setError('포트 세트는 프로토콜이 TCP/UDP일 때만 쓸 수 있습니다'); bad = true; }
+        else if (family.value && setFam !== 'any' && family.value !== setFam) { f.set.setError('규칙의 주소 종류와 세트의 주소 종류가 다릅니다'); bad = true; }
+      }
       if (bad) return;
 
       const listVal = (s) => { const ts = tokens(s); return ts.length > 1 ? ts : (ts[0] || ''); };
+      const setValue = setSel.value ? ipsetRefText({ neg: setMode.value === '!', name: setSel.value, dir: setDir.value }) : '';
       const want = {
+        ...(setEditable ? { ipset: setValue } : {}),
         name: name.value.trim(),
         family: family.value,
         proto: protos.length > 1 ? protos : (protos[0] || ''),
@@ -217,6 +260,8 @@ function trafficRulesPage(root) {
       h('div', { class: 'fieldset' }, f.srcIp.el, f.srcMac.el),
       h('div', { class: 'fieldset' }, f.dest.el, f.destPort.el),
       f.destIp.el,
+      setEditable ? f.set.el : h('p', { class: 'muted' }, `IP 세트 ${setRefs.length}개를 쓰는 규칙입니다. 세트 조건은 그대로 유지됩니다.`),
+      setEditable ? setOptions : null,
       f.limit.el, enabled.el,
       err, h('div', { class: 'actions' }, cancel, save));
   }

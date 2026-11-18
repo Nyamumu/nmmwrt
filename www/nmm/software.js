@@ -1,6 +1,6 @@
 // 소프트웨어 관리 (특수 기능): apk(OpenWrt 25)로 패키지를 찾고, 설치/삭제/업그레이드한다.
 //   설치된 목록: /lib/apk/db/installed (P: 이름, V: 버전, T: 설명, I: 설치 크기) 를 file read로 읽는다.
-//   설치 가능 / 업데이트: rpcd file exec로 `apk list --available <*검색어*>`, `apk list --upgradable`.
+//   설치 가능 / 업데이트: rpcd file exec로 `apk search -v <*검색어*>`(이름, 버전, 설명), `apk list --upgradable`.
 //   동작: apk update / add / del / upgrade, 올린 파일은 cgi-upload로 /tmp/upload.apk에 둔 뒤 apk add --allow-untrusted.
 // 저장 공간은 system info의 root(KB).
 
@@ -37,16 +37,59 @@ function parseApkDb(text) {
 }
 
 // `apk list` 한 줄: 'name-1.2.3-r4 aarch64_cortex-a53 {origin} (license) [installed]' 또는 '[upgradable from: name-1.2.2-r1]'
+// LuCI 패키지의 버전에는 -r 숫자가 없다 (예: luci-app-sqm-26.320.60423~5331286)
 function parseApkListLine(line) {
-  const m = /^(\S+?)-(\d[^\s]*?-r\d+)\s+(\S+)?(.*)$/.exec(line.trim());
+  const m = /^(\S+?)-(\d[^\s-]*(?:-r\d+)?)\s+(\S+)?(.*)$/.exec(line.trim());
   if (!m) return null;
   const rest = m[4] || '';
-  const from = /upgradable from: \S+?-(\d[^\s\]]*-r\d+)/.exec(rest);
+  const from = /upgradable from: \S+?-(\d[^\s\]-]*(?:-r\d+)?)\]/.exec(rest);
   return { name: m[1], version: m[2], installed: /\[installed/.test(rest), from: from ? from[1] : '' };
 }
 
 function parseApkList(text) {
   return String(text || '').split('\n').map(parseApkListLine).filter(Boolean);
+}
+
+// `apk search -v` 한 줄: 'name-1.2.3-r4 - 설명'
+function parseApkSearch(text) {
+  return String(text || '').split('\n').map((line) => {
+    const m = /^(\S+?)-(\d[^\s-]*(?:-r\d+)?)(?:\s+-(?:\s+(.*))?)?$/.exec(line.trim());
+    return m ? { name: m[1], version: m[2], desc: m[3] || '' } : null;
+  }).filter(Boolean);
+}
+
+// apk 명령을 차례로 실행하고 결과를 창으로 보여 준다. 하나라도 실패하면 멈춘다. 모두 성공하면 true
+// steps: [{ label, params }]
+async function apkRunSteps(title, steps, note) {
+  const box = h('pre', { class: 'apk-log' }, '실행 중입니다... 인터넷 속도에 따라 1~2분 걸릴 수 있습니다.');
+  const ok = h('button', { class: 'btn', type: 'button', disabled: true, onclick: closeModal }, '확인');
+  showModal(h('h3', null, title), note ? h('p', { class: 'muted' }, note) : null, box, h('div', { class: 'actions' }, ok));
+  const log = [];
+  for (const step of steps) {
+    if (steps.length > 1) box.textContent = `${step.label} 중입니다... 인터넷 속도에 따라 1~2분 걸릴 수 있습니다.`;
+    let res;
+    try {
+      res = await apkExec(step.params);
+    } catch (e) {
+      if (await handleDenied(e) === 'expired') return false;
+      box.textContent = e instanceof RpcError && e.code === UBUS_PERMISSION_DENIED
+        ? '권한이 없습니다. (ACL에 apk 실행이 없습니다. 최신 NMMWrt를 다시 배포해 주세요.)'
+        : `실행하지 못했습니다. 시간이 오래 걸려 응답을 놓쳤을 수 있으니 잠시 뒤 목록을 다시 확인해 주세요.\n(${e.message || e})`;
+      ok.disabled = false;
+      return false;
+    }
+    const out = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
+    if (out) log.push(out);
+    if (res.code !== 0) {
+      box.textContent = [`실패했습니다. (코드 ${res.code})`, ...log].join('\n\n');
+      box.classList.add('apk-fail');
+      ok.disabled = false;
+      return false;
+    }
+  }
+  box.textContent = ['완료했습니다.', ...log].join('\n\n');
+  ok.disabled = false;
+  return true;
 }
 
 function softwarePage(root) {
@@ -76,28 +119,7 @@ function softwarePage(root) {
 
   /* ---------- 실행 + 결과 창 ---------- */
 
-  // apk를 실행하고 결과를 창으로 보여 준다. 성공하면 true
-  async function run(title, params, note) {
-    const box = h('pre', { class: 'apk-log' }, '실행 중입니다... 인터넷 속도에 따라 1~2분 걸릴 수 있습니다.');
-    const ok = h('button', { class: 'btn', type: 'button', disabled: true, onclick: closeModal }, '확인');
-    showModal(h('h3', null, title), note ? h('p', { class: 'muted' }, note) : null, box, h('div', { class: 'actions' }, ok));
-    let res;
-    try {
-      res = await apkExec(params);
-    } catch (e) {
-      if (await handleDenied(e) === 'expired') return false;
-      box.textContent = e instanceof RpcError && e.code === UBUS_PERMISSION_DENIED
-        ? '권한이 없습니다. (ACL에 apk 실행이 없습니다. 최신 NMMWrt를 다시 배포해 주세요.)'
-        : `실행하지 못했습니다. 시간이 오래 걸려 응답을 놓쳤을 수 있으니 잠시 뒤 목록을 다시 확인해 주세요.\n(${e.message || e})`;
-      ok.disabled = false;
-      return false;
-    }
-    const out = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
-    box.textContent = (res.code === 0 ? '완료했습니다.' : `실패했습니다. (코드 ${res.code})`) + (out ? `\n\n${out}` : '');
-    box.classList.toggle('apk-fail', res.code !== 0);
-    ok.disabled = false;
-    return res.code === 0;
-  }
+  const run = (title, params, note) => apkRunSteps(title, [{ label: title, params }], note);
 
   async function install(name) {
     if (!await confirmDialog('패키지 설치', `'${name}' 패키지를 설치합니다. 필요한 다른 패키지도 함께 설치됩니다.`, '설치')) return;
@@ -122,11 +144,11 @@ function softwarePage(root) {
   const cache = { search: null, updates: null };
 
   async function searchAvailable(term) {
-    const res = await apkExec(['list', '--available', `*${term}*`]);
+    const res = await apkExec(['search', '-v', `*${term}*`]);
     if (res.code !== 0) throw new Error(res.stderr || `apk 코드 ${res.code}`);
     // 같은 이름이 여러 버전으로 나올 수 있어 마지막 것만 남긴다
     const map = new Map();
-    for (const p of parseApkList(res.stdout)) map.set(p.name, p);
+    for (const p of parseApkSearch(res.stdout)) map.set(p.name, p);
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -247,8 +269,9 @@ function softwarePage(root) {
       if (!alive || view.tab !== 'available') return;
       const inst = new Map(data.installed.map((p) => [p.name, p.version]));
       const list = cache.search.list;
-      listBox.replaceChildren(table(['이름', '버전', '상태', ''], list.slice(0, view.shown).map((p) => h('tr', null,
+      listBox.replaceChildren(table(['이름', '버전', '설명', '상태', ''], list.slice(0, view.shown).map((p) => h('tr', null,
         h('td', null, h('b', null, p.name)), h('td', null, p.version),
+        h('td', { class: 'pkg-desc' }, p.desc),
         h('td', null, inst.has(p.name) ? h('span', { class: 'pill ok' }, `설치됨 ${inst.get(p.name)}`) : h('span', { class: 'muted' }, '-')),
         h('td', { class: 'actions-cell' }, inst.has(p.name) ? null
           : h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => install(p.name) }, '설치')))),

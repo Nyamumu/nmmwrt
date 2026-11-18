@@ -69,7 +69,8 @@ svg.ic { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor
 
 .field { display: block; margin-bottom: 12px; }
 .field > span { display: block; margin-bottom: 3px; font-size: 13px; color: var(--muted); }
-.field input, .field select {
+.field textarea { display: block; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; }
+.field input, .field select, .field textarea {
   width: 100%;
   padding: 7px 10px;
   min-height: 37px;
@@ -91,11 +92,11 @@ svg.ic { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor
 .ms-panel label { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; }
 .ms-panel label:hover { background: var(--bg); }
 .ms-panel .muted { font-size: 12px; }
-.field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent-strong); }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent-strong); }
 .field small { display: block; margin-top: 3px; font-size: 12px; }
 .field .hint { color: var(--muted); }
 .field .err { color: var(--bad); }
-.field input.invalid, .field select.invalid { border-color: var(--bad); }
+.field input.invalid, .field select.invalid, .field textarea.invalid { border-color: var(--bad); }
 
 .btn {
   width: 100%;
@@ -224,6 +225,32 @@ svg.ic { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor
 td.pkg-desc { font-size: 13px; color: var(--muted); max-width: 420px; }
 .apk-log { max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 3px; }
 .apk-log.apk-fail { color: var(--bad); }
+/* 국가 차단 */
+.geo-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; min-height: 26px; align-items: center; }
+.geo-chip { border: 0; cursor: pointer; color: inherit; }
+.geo-list { max-height: 240px; border: 1px solid var(--input-line); border-radius: 3px; margin-top: 6px; }
+.geo-list label[hidden] { display: none; }
+.geo-list label .muted { margin-left: auto; }
+/* 무선 개요 */
+.wo-row { display: flex; align-items: center; gap: 14px; padding: 11px 8px; border-top: 1px solid var(--input-line); }
+.wo-radio { background: var(--bg); border-radius: 3px; border-top: 0; margin-top: 8px; }
+.wo-off { opacity: .6; }
+.wo-badge { flex: none; width: 128px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 12px; text-align: center; }
+.wo-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.wo-main .muted { font-size: 13px; }
+.wo-title { font-size: 15px; font-weight: 600; }
+.wo-actions { flex: none; display: flex; gap: 6px; }
+.wo-actions a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+.wo-signal { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; white-space: nowrap; }
+td.wo-rate { font-size: 13px; line-height: 1.6; min-width: 230px; }
+.wifi-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 19px; }
+.wifi-bars i { display: block; width: 5px; border-radius: 1px; background: var(--input-line); }
+.wifi-bars i.on { background: var(--accent-strong); }
+@media (max-width: 1100px) {
+  .wo-row { flex-wrap: wrap; }
+  .wo-main { flex-basis: calc(100% - 142px); }
+  .wo-actions { margin-left: auto; }
+}
 /* 트래픽 규칙 표 */
 .rule-match { font-size: 13px; line-height: 1.7; }
 .rule-match .zone-pill, .rule-match .ms-chip { padding: 0 7px; font-size: 12px; }

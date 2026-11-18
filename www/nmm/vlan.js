@@ -137,6 +137,7 @@ function vlanPage(root) {
     const wan = ctx.ifaces.find((s) => s['.name'] === 'wan');
     body.replaceChildren(
       wan ? wanVlanCard(ctx, wan) : messageCard('인터넷(WAN) 인터페이스가 없는 공유기입니다. 인터넷 VLAN 태그는 쓸 수 없습니다.'),
+      ...guestStatusCards(ctx),
       lan ? (ctx.sw ? swconfigCard(ctx, lan) : dsaCard(ctx, lan)) : messageCard('내부 네트워크(LAN) 인터페이스가 없습니다.'),
     );
   }
@@ -210,7 +211,8 @@ function vlanPage(root) {
     return h('td', null, netText(iface), editable
       ? h('button', { class: 'btn btn-ghost btn-small', type: 'button', style: 'margin-left:6px', onclick: () => editNetwork(ctx, iface) }, '수정')
       : null,
-      editable ? h('div', { class: 'muted' }, `접속 허용: ${policySummary(readPolicy(ctx, iface['.name'], [], POLICY_DEFAULT).policy)}`) : null);
+      editable ? h('div', { class: 'muted' }, `접속 허용: ${policySummary(readPolicy(ctx, iface['.name'], [], POLICY_DEFAULT).policy)}`) : null,
+      netWifiLine(ctx, iface));
   }
 
   async function editNetwork(ctx, iface) {
@@ -711,6 +713,48 @@ function vlanNetworkDeleteOps(ctx, n, vlanSection) {
     if (mine) add('firewall', s['.name']);
   }
   return ops;
+}
+
+/* ---------- VLAN 설정 화면의 무선 상태 표시 ---------- */
+
+// 네트워크 n에 붙은 무선 중 실제로 켜진 것 (무선 네트워크와 무선 장치가 모두 켜져 있어야 한다)
+function netWifiState(ctx, n) {
+  const radioOf = (w) => ctx.wl.find((s) => s['.type'] === 'wifi-device' && s['.name'] === w.device);
+  const wifis = ctx.wl.filter((s) => s['.type'] === 'wifi-iface' && asList(s.network).includes(n));
+  const on = wifis.filter((w) => w.disabled !== '1' && radioOf(w) && radioOf(w).disabled !== '1');
+  return {
+    wifis,
+    on,
+    ssids: [...new Set(on.map((w) => w.ssid).filter(Boolean))],
+    bands: [...new Set(on.map((w) => BAND_LABEL[radioBand(radioOf(w))] || w.device))],
+  };
+}
+
+// VLAN 표의 네트워크 칸: 이 VLAN 네트워크에 붙은 무선 상태. 내부 네트워크처럼 시스템 네트워크는 표시하지 않는다.
+function netWifiLine(ctx, iface) {
+  if (!iface || SYSTEM_NETS.includes(iface['.name'])) return null;
+  const st = netWifiState(ctx, iface['.name']);
+  if (!st.wifis.length) return null;
+  return h('div', { style: 'margin-top:4px' },
+    h('span', { class: 'pill ' + (st.on.length ? 'ok' : 'off') }, st.on.length ? '무선 활성화' : '무선 꺼짐'),
+    st.on.length ? h('span', { class: 'muted', style: 'margin-left:6px' }, `${st.ssids.join(', ')} · ${st.bands.join(', ')}`) : null);
+}
+
+// 게스트 네트워크는 VLAN 없이 무선으로만 동작하므로 VLAN 표와 따로 상태를 보여 준다. 무선 장치가 없는 공유기는 표시하지 않는다.
+function guestStatusCards(ctx) {
+  const iface = ctx.ifaces.find((i) => i['.name'] === 'guest');
+  if (!iface && !ctx.wl.some((s) => s['.type'] === 'wifi-device')) return [];
+  const st = netWifiState(ctx, 'guest');
+  const active = !!iface && st.on.length > 0;
+  const addr = iface ? readAddr(iface).ip : '';
+  const text = active ? `무선 이름 ${st.ssids.join(', ') || '-'} · ${st.bands.join(', ')}${addr ? ` · 공유기 주소 ${addr}` : ''}`
+    : iface ? '게스트 네트워크는 만들어져 있지만 켜진 무선이 없습니다.'
+      : '게스트 네트워크를 사용하지 않습니다.';
+  return [h('section', { class: 'card form-card' },
+    h('div', { class: 'card-head' }, h('h3', null, '무선 게스트 네트워크'),
+      h('span', { class: 'pill ' + (active ? 'ok' : iface ? 'warn' : 'off') }, active ? '활성화' : iface ? '무선 꺼짐' : '비활성화')),
+    h('p', null, text),
+    h('p', { class: 'muted' }, 'VLAN을 쓰지 않는 무선 전용 네트워크입니다. ', h('a', { href: '#/guest' }, '게스트 / VLAN 네트워크에서 설정')))];
 }
 
 PAGES['/vlan'] = vlanPage;

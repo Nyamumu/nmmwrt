@@ -283,6 +283,7 @@ const MENU_ALL = [
     { path: '/interfaces', label: '인터페이스 목록' },
   ] },
   { group: '무선 관리', icon: 'wifi', items: [
+    { path: '/wifi-overview', label: '무선 개요' },
     { path: '/wireless', label: '무선 설정' },
     { path: '/wireless-advanced', label: '무선 고급 설정' },
     { path: '/guest', label: '게스트 / VLAN 네트워크' },
@@ -292,9 +293,12 @@ const MENU_ALL = [
     { path: '/firewall', label: '방화벽 설정' },
     { path: '/fw-rules', label: '트래픽 규칙' },
     { path: '/fw-nat', label: 'NAT 규칙' },
+    { path: '/fw-ipset', label: 'IP 세트' },
+    { path: '/routing', label: '라우팅 규칙' },
   ] },
   { group: '보안 기능', icon: 'shield', items: [
     { path: '/access', label: '인터넷 접속 차단' },
+    { path: '/geoblock', label: '국가 차단' },
   ] },
   { group: '특수 기능', icon: 'link', items: [
     { path: '/ddns', label: 'DDNS 설정' },
@@ -308,9 +312,11 @@ const MENU_ALL = [
   { group: '시스템 관리', icon: 'system', items: [
     { path: '/system', label: '기본 설정' },
     { path: '/password', label: '관리자 비밀번호' },
+    { path: '/ssh', label: 'SSH 설정' },
     { path: '/firmware', label: '펌웨어 업그레이드' },
     { path: '/maintenance', label: '재시작 / 백업 / 초기화' },
     { path: '/log', label: '시스템 로그' },
+    { path: '/sysinfo', label: '시스템 정보' },
     // LuCI가 있을 때만 보인다 (addons.js가 확인). 새 탭으로 연다.
     { path: '/luci', label: 'LuCI로 이동', href: '/cgi-bin/luci/', luci: true },
   ] },

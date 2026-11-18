@@ -1,15 +1,25 @@
 // 추가 패키지가 필요한 기능: DDNS(ddns-scripts), 속도 관리(sqm-scripts)
 
-// 대상은 OpenWrt 25 이상이므로 패키지 관리자는 apk
-async function installCommand(pkg) {
-  return `apk update && apk add ${pkg}`;
-}
-
-async function missingPackageCard(pkg, what) {
+// 패키지가 없을 때 보여 주는 카드. 대상은 OpenWrt 25 이상이므로 패키지 관리자는 apk. 설치가 끝나면 reload로 화면을 다시 읽는다.
+function missingPackageCard(pkg, what, reload) {
+  const installBtn = h('button', { class: 'btn btn-inline', type: 'button' }, '패키지 설치');
+  installBtn.addEventListener('click', async () => {
+    const ok = await confirmDialog(`${what} 패키지 설치`, [
+      `${pkg} 패키지와 여기에 필요한 패키지를 인터넷에서 받아 공유기에 설치합니다.`,
+      h('p', { class: 'muted' }, '공유기의 인터넷 연결과 저장 공간이 필요합니다.'),
+    ], '설치');
+    if (!ok) return;
+    installBtn.disabled = true;
+    const done = await apkRunSteps(`${pkg} 설치`, [
+      { label: '패키지 목록을 받는', params: ['update'] },
+      { label: `${pkg} 패키지를 설치하는`, params: ['add', pkg] },
+    ]);
+    installBtn.disabled = false;
+    if (done) reload();
+  });
   return card('패키지가 필요합니다',
     h('p', null, `${what} 기능을 쓰려면 공유기에 ${pkg} 패키지를 설치해야 합니다.`),
-    h('p', { class: 'muted' }, 'SSH로 공유기에 접속해서 아래 명령을 실행한 뒤 이 화면을 새로고침하세요.'),
-    h('code', { class: 'cmd' }, await installCommand(pkg)));
+    h('div', { class: 'actions' }, installBtn));
 }
 
 /* ---------- DDNS ---------- */
@@ -39,7 +49,7 @@ function ddnsPage(root) {
       return;
     }
     if (!alive) return;
-    if (!exists) { body.replaceChildren(await missingPackageCard('ddns-scripts', 'DDNS')); return; }
+    if (!exists) { body.replaceChildren(missingPackageCard('ddns-scripts', 'DDNS', load)); return; }
     render((sections || []).filter((s) => s['.type'] === 'service'));
   }
 
@@ -133,7 +143,7 @@ function trafficPage(root) {
       return;
     }
     if (!alive) return;
-    if (!exists) { body.replaceChildren(await missingPackageCard('sqm-scripts', '속도 관리(SQM)')); return; }
+    if (!exists) { body.replaceChildren(missingPackageCard('sqm-scripts', '속도 관리(SQM)', load)); return; }
     const wanDev = (wan && wan.values && wan.values.device) || 'wan';
     render((sections || []).find((s) => s['.type'] === 'queue') || null, wanDev);
   }

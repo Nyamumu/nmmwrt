@@ -375,6 +375,50 @@ function logPage(root) {
   load();
 }
 
+// 시스템 정보: 공유기 모델, 펌웨어, 커널, 시각, 가동 시간, 평균 부하. 5초마다 갱신한다.
+function systemInfoPage(root) {
+  const box = card('시스템 정보', h('span', { class: 'muted' }, '불러오는 중...'));
+  root.append(pageTitle('시스템 정보'), box);
+  let stopped = false;
+  let timer = null;
+  let nmmVersion = '';
+  fetch('VERSION', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((t) => { nmmVersion = /^\d+\.\d+\.\d+$/.test(t.trim()) ? t.trim() : ''; }).catch(() => {});
+
+  async function refresh() {
+    let board, info;
+    try {
+      [board, info] = await Promise.all([ubus('system', 'board'), ubus('system', 'info')]);
+    } catch (e) {
+      const text = await loadFailureText(e);
+      if (!stopped && text) box.replaceChildren(h('div', { class: 'card-head' }, h('h3', null, '시스템 정보')), h('span', { class: 'muted' }, text));
+      return;
+    }
+    if (stopped) return;
+    const rel = board.release || {};
+    const firmware = rel.description || [rel.distribution, rel.version, rel.revision].filter(Boolean).join(' ');
+    box.replaceChildren(h('div', { class: 'card-head' }, h('h3', null, '시스템 정보')), kv([
+      ['호스트 이름', board.hostname || '-'],
+      ['모델', board.model || '-'],
+      ['아키텍처', board.system || '-'],
+      ['대상 플랫폼', rel.target || '-'],
+      ['펌웨어 버전', firmware || '-'],
+      ['NMMWrt 버전', nmmVersion || '-'],
+      ['커널 버전', board.kernel || '-'],
+      ['공유기 시각', info.localtime ? fmtRouterTime(info.localtime) : '-'],
+      ['가동 시간', info.uptime != null ? fmtUptime(info.uptime) : '-'],
+      ['평균 부하 (1분, 5분, 15분)', (info.load || []).map((n) => (n / 65536).toFixed(2)).join(', ') || '-'],
+    ]));
+  }
+
+  async function tick() {
+    if (!document.hidden) await refresh();
+    if (!stopped) timer = setTimeout(tick, POLL_MS);
+  }
+  tick();
+  return () => { stopped = true; clearTimeout(timer); };
+}
+
+PAGES['/sysinfo'] = systemInfoPage;
 PAGES['/system'] = systemPage;
 PAGES['/password'] = passwordPage;
 PAGES['/firmware'] = firmwarePage;

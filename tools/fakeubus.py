@@ -188,6 +188,8 @@ def default_uci(profile="mt3000"):
             S("timeserver", "ntp", enabled="1", enable_server="0",
               server=["0.openwrt.pool.ntp.org", "1.openwrt.pool.ntp.org"]),
         ],
+        "dropbear": [S("dropbear", "main", enable="1", PasswordAuth="on", RootPasswordAuth="on", Port="22")],
+        "banip": [S("banip", "global", ban_enabled="0", ban_debug="0", ban_autodetect="1")],
         # 아래 두 개는 실제로는 ddns-scripts / sqm-scripts 패키지를 깔아야 생긴다 (--no-packages로 없앨 수 있다)
         "ddns": [
             S("ddns", "global", ddns_dateformat="%F %R", ddns_loglines="250", upd_privateip="0"),
@@ -354,6 +356,7 @@ class FakeUbus:
         self.committed = self._factory_uci()           # /etc/config
         self.running = copy.deepcopy(self.committed)   # 마지막으로 적용된 설정
         self.files = {}                                # cgi-upload로 올라온 파일 (경로 -> bytes)
+        self.kicked = set()                            # 연결 끊기를 한 무선 기기
         self.logs = []                                 # 시스템 로그 (log read)
         self._log_event("procd: - init complete -")
         self._log_event("netifd: Interface 'wan' is now up")
@@ -386,7 +389,7 @@ class FakeUbus:
             "network.device": {"status": self.device_status},
             # 실기기(25.12.6): uhttpd가 세션 인자를 덧붙여서 웹에서는 항상 [2]. UI는 iwinfo + uci로 대신한다.
             "network.wireless": {"status": self.wireless_status_web},
-            "file": {"read": self.file_read, "exec": self.file_exec, "list": self.file_list},
+            "file": {"read": self.file_read, "write": self.file_write, "exec": self.file_exec, "list": self.file_list},
             "rpc-sys": {"password_set": self.password_set, "factory": self.factory,
                         "upgrade_start": self.upgrade_start,
                         "packagelist": lambda sid, args: {"packages": {n: v[0] for n, v in sorted(self._apk_state().items())}}},
@@ -469,6 +472,9 @@ class FakeUbus:
                         "down": lambda sid, a: self.iface_updown(name, False),
                         "renew": lambda sid, a: None,
                         "status": lambda sid, a: self._iface(find_section(self.running["network"], name))}
+        prefix = "hostapd."
+        if obj.startswith(prefix) and obj[len(prefix):] in self._live_ifaces():
+            return {"del_client": self.hostapd_del_client}
         return None
 
     def _list(self, id_, params):
@@ -538,6 +544,7 @@ class FakeUbus:
         if not self.packages:
             cfg.pop("ddns", None)
             cfg.pop("sqm", None)
+            cfg.pop("banip", None)
         # 실제 uci처럼 익명 섹션에도 'cfg' + 16진수 이름을 붙인다 (항상 같은 이름이 나오게)
         for config, sections in cfg.items():
             for i, sec in enumerate(sections):
@@ -611,6 +618,15 @@ class FakeUbus:
             return {"code": 0, "stdout": ""}
         if cmd == "/usr/bin/apk":
             return self._apk(params)
+        if cmd == "/etc/init.d/banip":
+            if params == ["restart"]:
+                sec = find_section(self.running["banip"], "global")
+                sets = [f"country.v{v}" for v in (4, 6)] if "country" in as_list(sec.get("ban_feed")) else []
+                self.banip_status = {"status": "active", "element_count": "12 345 (chains: 8, sets: 2, rules: 10)",
+                                     "active_feeds": sets, "last_run": "mode: restart, date / time: 2026-11-19 02:00:00, duration: 0m 9s"}
+            elif params == ["stop"]:
+                self.banip_status = {"status": "stopped", "element_count": "0", "active_feeds": [], "last_run": "-"}
+            return {"code": 0, "stdout": ""}
         if cmd == "/usr/libexec/nmmwrt-update":
             # 가짜 업데이트: 새 버전이 하나 있고, 설치하면 최신이 된다
             latest = "1.0.15"
@@ -642,7 +658,26 @@ class FakeUbus:
         "luci-app-upnp": ("25.290.1-r1", "UPnP IGD & PCP configuration"),
         "miniupnpd-nftables": ("2.3.9-r1", "Lightweight UPnP IGD, NAT-PMP & PCP daemon"),
         "tailscale-tools": ("1.90.1-r1", ""), "tcpdump": ("4.99.5-r1", "Network monitoring and data acquisition tool"),
+        "ddns-scripts": ("2.8.4-r9", "Dynamic DNS Client scripts"),
+        "sqm-scripts": ("1.7.2-r1", "Smart Queue Management scripts"),
+        "luci-app-sqm": ("26.320.60423~5331286", "Control the simple_qos SQM script"),
+        "banip": ("1.9.1-r5", "banIP blocks IPs via named nftables Sets."),
     }
+    # 패키지를 설치하면 생기는 설정 파일 (--no-packages로 켠 공유기에서 설치 흐름을 확인한다)
+    APK_CONFIGS = {"ddns-scripts": "ddns", "sqm-scripts": "sqm", "banip": "banip"}
+    BANIP_COUNTRIES = "".join(f"{c}\t{r}\t{n}\n" for c, r, n in [
+        ("cn", "APNIC", "China"), ("kr", "APNIC", "Korea (the Republic of)"), ("jp", "APNIC", "Japan"), ("ru", "RIPE", "Russian Federation"),
+        ("us", "ARIN", "United States of America"), ("de", "RIPE", "Germany"), ("br", "LACNIC", "Brazil"), ("ap", "AFRINIC", "ARIPO")])
+
+    def _apk_add_config(self, pkg):
+        config = self.APK_CONFIGS.get(pkg)
+        if not config or config in self.committed:
+            return
+        packages, self.packages = self.packages, True
+        factory = self._factory_uci()
+        self.packages = packages
+        self.committed[config] = copy.deepcopy(factory[config])
+        self.running[config] = copy.deepcopy(factory[config])
 
     def _apk_state(self):
         if not hasattr(self, "apk_installed"):
@@ -671,6 +706,10 @@ class FakeUbus:
             pats = [p for p in rest if not p.startswith("-")] or ["*"]
             names = [n for n in sorted(self.APK_REPO) if any(fnmatch.fnmatch(n, p) for p in pats)]
             return {"code": 0, "stdout": "\n".join(line(n, self.APK_REPO[n][0], " [installed]" if n in inst else "") for n in names) + "\n"}
+        if sub == "search":
+            pats = [p for p in rest if not p.startswith("-")] or ["*"]
+            names = [n for n in sorted(self.APK_REPO) if any(fnmatch.fnmatch(n, p) for p in pats)]
+            return {"code": 0, "stdout": "".join(f"{n}-{self.APK_REPO[n][0]} - {self.APK_REPO[n][1]}\n" for n in names)}
         if sub == "update":
             self.apk_updated = True
             return {"code": 0, "stdout": "fetch https://downloads.openwrt.org/releases/25.12.6/packages.adb\nOK: 9876 distinct packages available\n"}
@@ -686,6 +725,7 @@ class FakeUbus:
                     return {"code": 1, "stderr": f"ERROR: unable to select packages:\n  {n} (no such package):\n    required by: world[{n}]\n"}
                 ver, desc = self.APK_REPO[n]
                 inst[n] = (ver, desc or (inst.get(n) or ("", "", 0))[1], (inst.get(n) or ("", "", 65536))[2])
+                self._apk_add_config(n)
             self.log(f"[fakeubus] apk {sub} {' '.join(rest)}")
             return {"code": 0, "stdout": "".join(f"(1/1) Installing {n}\n" for n in names) + "OK: 16 MiB in 180 packages\n"}
         if sub == "del":
@@ -1048,10 +1088,18 @@ class FakeUbus:
                                              "HE20", "HE40", "HE80", "HE160"]),
               "6g": (["ax", "be"], ["HE20", "HE40", "HE80", "HE160", "EHT20", "EHT40", "EHT80", "EHT160", "EHT320"])}
         hwmodes, htmodes = hw.get(band, ([], []))
+        channel = int(radio.get("channel") if str(radio.get("channel", "")).isdigit() else (36 if band == "5g" else 1))
+        base = {"2g": 2407, "5g": 5000, "6g": 5950}.get(band, 2407)
+        enc = str(cfg.get("encryption") or "none").split("+")[0]
+        wpa = {"psk2": ([2], ["psk"]), "sae-mixed": ([2, 3], ["psk", "sae"]), "sae": ([3], ["sae"])}.get(enc)
+        ifname = args.get("device")
         return {"phy": "phy" + radio[".name"][-1], "ssid": cfg.get("ssid"), "mode": "Master",
-                "hwmodes": hwmodes, "htmodes": htmodes,
+                "bssid": "94:83:C4:CA:E%d:F%d" % (int(radio[".name"][-1]), int(ifname[-1])),
+                "hwmodes": hwmodes, "htmodes": htmodes, "hardware": {"name": "MediaTek MT7986"},
                 "country": radio.get("country") or "00", "txpower": int(radio.get("txpower") or 23),
-                "channel": int(radio.get("channel") if str(radio.get("channel", "")).isdigit() else 1)}
+                "channel": channel, "frequency": base + channel * 5,
+                "bitrate": 1264700 if band == "5g" else 143400, "signal": -52, "noise": -92, "quality": 58, "quality_max": 70,
+                "encryption": {"enabled": True, "wpa": wpa[0], "authentication": wpa[1], "ciphers": ["ccmp"]} if wpa else {"enabled": False}}
 
     def iface_updown(self, name, up):
         if up:
@@ -1162,11 +1210,21 @@ class FakeUbus:
         bands = {r.get("band") for r in self.running["wireless"] if r[".type"] == "wifi-device"}
         band = radio.get("band")
         out = []
+        if not str(args.get("device")).endswith("-ap0"):  # 가짜 기기는 대역의 첫 번째 무선에만 붙어 있다
+            return {"results": out}
+        rate = {"rate": 1729600, "mhz": 160, "he": True, "mcs": 8, "nss": 2} if band != "2g" else \
+            {"rate": 72200, "mhz": 20, "ht": True, "mcs": 7, "short_gi": True}
         for mac, (kind, where) in self.CLIENT_PLACES.items():
             # 그 대역이 없는 공유기면 2.4GHz에 붙인다
-            if kind == "wifi" and (where == band or (where not in bands and band == "2g")):
-                out.append({"mac": mac.upper(), "signal": -48, "noise": -95, "inactive": 120})
+            if mac not in self.kicked and kind == "wifi" and (where == band or (where not in bands and band == "2g")):
+                out.append({"mac": mac.upper(), "signal": -48, "signal_avg": -48, "noise": -95, "inactive": 120,
+                            "connected_time": 5400, "rx": dict(rate), "tx": dict(rate, rate=rate["rate"] // 2)})
         return {"results": out}
+
+    def hostapd_del_client(self, sid, args):
+        if not isinstance(args.get("addr"), str):
+            raise Status(UBUS_INVALID_ARGUMENT)
+        self.kicked.add(args["addr"].lower())
 
     # 실기기 GL-MT3000의 LED (트리거 목록은 실제 커널 것 일부)
     LEDS = ["blue:run", "white:system", "mt76-phy0", "mt76-phy1"]
@@ -1260,6 +1318,17 @@ class FakeUbus:
             raise Status(UBUS_NOT_FOUND)
         return {"entries": [{"name": n, "type": "symlink"} for n in members]}
 
+    SSH_KEYS = "/etc/dropbear/authorized_keys"
+
+    def file_write(self, sid, args):
+        path, data = args.get("path"), args.get("data")
+        if not isinstance(path, str) or not isinstance(data, str):
+            raise Status(UBUS_INVALID_ARGUMENT)
+        if not self._file_ok(sid, path, "write"):
+            raise Status(UBUS_PERMISSION_DENIED)
+        self.files[path] = data.encode()
+        return None
+
     def file_read(self, sid, args):
         path = args.get("path")
         if not isinstance(path, str):
@@ -1271,6 +1340,14 @@ class FakeUbus:
         if self.packages:
             for name, menu in self.LUCI_MENU.items():
                 files[f"{self.LUCI_MENU_DIR}/{name}"] = (lambda m=menu: json.dumps(m, indent=1))
+        if "banip" in self.committed:
+            files["/etc/banip/banip.countries"] = lambda: self.BANIP_COUNTRIES
+            if getattr(self, "banip_status", None):
+                files["/var/run/banIP/banIP.runtime.json"] = lambda: json.dumps(self.banip_status)
+        if path == self.SSH_KEYS:  # 공개 키를 저장한 적이 없으면 파일이 없다
+            if path not in self.files:
+                raise Status(UBUS_NOT_FOUND)
+            return {"data": self.files[path].decode()}
         data = files[path]() if path in files else self._sysfs(path)
         if data is None:
             raise Status(UBUS_NOT_FOUND)

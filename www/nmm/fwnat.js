@@ -88,7 +88,7 @@ function natRulesPage(root) {
     const protoOpts = [...RULE_PROTOS, ...curProtos.filter((p) => !RULE_PROTOS.some(([v]) => v === p)).map((p) => [p, p.toUpperCase()])];
     const proto = multiSelect('프로토콜', protoOpts, curProtos,
       { chip: (v) => h('span', { class: 'ms-chip' }, (protoOpts.find(([k]) => k === v) || [v, v])[1]), empty: '모든 프로토콜 (기본)' });
-    const src = selectEl([['', '고르세요'], ['*', '모든 영역'], ...ctx.zones.map((z) => [z, z])], cur.src || '');
+    const src = selectEl([['', '-'], ['*', '모든 영역'], ...ctx.zones.map((z) => [z, z])], cur.src || '');
     const device = text(cur.device, '비우면 그 영역의 모든 장치');
     const srcIp = text(ruleList(cur.src_ip), '비우면 모두');
     const srcPort = text(ruleList(cur.src_port), '비우면 모두');

@@ -149,6 +149,8 @@ class SessionAndAcl(Base):
         apk = lambda *p: self.call(sid, "file", "exec", {"command": "/usr/bin/apk", "params": list(p)})
         self.assertIn("P:busybox", self.call(sid, "file", "read", {"path": "/lib/apk/db/installed"})[1]["data"])
         self.assertIn("tcpdump-", apk("list", "--available", "*tcp*")[1]["stdout"])
+        self.assertIn("tcpdump-4.99.5-r1 - Network monitoring", apk("search", "-v", "*tcp*")[1]["stdout"])
+        self.assertEqual(apk("search", "--description", "*tcp*"), [6])
         self.assertIn("upgradable from", apk("list", "--upgradable")[1]["stdout"])
         self.assertEqual(apk("add", "tcpdump")[1]["code"], 0)
         self.assertIn("P:tcpdump", self.call(sid, "file", "read", {"path": "/lib/apk/db/installed"})[1]["data"])
@@ -355,7 +357,7 @@ class Uci(Base):
         self.assertEqual(self.call(sid, "uci", "get", {"config": "luci"}), [6])  # uci 범위 밖
         # 실제 rpcd: 읽기 권한과 상관없이 전체 목록
         self.assertEqual(self.call(sid, "uci", "configs")[1]["configs"],
-                         ["ddns", "dhcp", "firewall", "network", "sqm", "system", "wireless"])
+                         ["banip", "ddns", "dhcp", "dropbear", "firewall", "network", "sqm", "system", "wireless"])
 
     def test_get_shapes(self):
         sid = self.login()
@@ -613,6 +615,128 @@ class Profiles(unittest.TestCase):
         dump = {i["interface"]: i for i in call(sid, "network.interface", "dump")[1]["interface"]}
         self.assertEqual(dump["guest"]["device"], "br-lan.30")
         self.assertEqual(dump["guest"]["ipv4-address"][0]["address"], "192.168.30.1")
+
+    def test_ipset_and_rule_reference(self):
+        """IP 세트 화면과 트래픽 규칙이 쓰는 firewall 섹션을 배포용 ACL로 만들고 고칠 수 있다."""
+        fake, call, sid, clock = self.make("dsa4")
+        res = call(sid, "uci", "add", {"config": "firewall", "type": "ipset", "values": {
+            "name": "blocklist", "family": "ipv4", "match": ["src_net"], "entry": ["192.0.2.1", "198.51.100.0/24"]}})
+        self.assertEqual(res[0], 0)
+        section = res[1]["section"]
+        rule = call(sid, "uci", "add", {"config": "firewall", "type": "rule", "values": {
+            "name": "Block-List", "src": "lan", "dest": "wan", "ipset": "blocklist src", "target": "REJECT"}})
+        self.assertEqual(rule[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 60}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        got = call(sid, "uci", "get", {"config": "firewall", "section": section})[1]["values"]
+        self.assertEqual(got[".type"], "ipset")
+        self.assertEqual(got["match"], ["src_net"])
+        self.assertEqual(got["entry"], ["192.0.2.1", "198.51.100.0/24"])
+        # 항목 바꾸기와 끄기
+        self.assertEqual(call(sid, "uci", "set", {"config": "firewall", "section": section,
+                                                  "values": {"entry": ["203.0.113.5"], "enabled": "0"}})[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 60}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        got = call(sid, "uci", "get", {"config": "firewall", "section": section})[1]["values"]
+        self.assertEqual((got["entry"], got["enabled"]), (["203.0.113.5"], "0"))
+
+    def test_ipset_page_is_loaded_and_in_menu(self):
+        """새 화면 파일이 index.html, 메뉴, 페이지 등록에 모두 연결되어 있다."""
+        www = os.path.join(BASE, "www", "nmm")
+        def read(name):
+            with open(os.path.join(www, name), encoding="utf-8") as f:
+                return f.read()
+        self.assertIn('src="fwipset.js?v=__V__"', read("index.html"))
+        self.assertIn("path: '/fw-ipset'", read("app.js"))
+        self.assertIn("PAGES['/fw-ipset']", read("fwipset.js"))
+
+    def test_geoblock_acl(self):
+        """국가 차단: banip 설정과 정해진 서비스 명령만 쓸 수 있다."""
+        fake, call, sid, clock = self.make("dsa4")
+        init = lambda *p: call(sid, "file", "exec", {"command": "/etc/init.d/banip", "params": list(p)})
+        self.assertIn("kr\tAPNIC", call(sid, "file", "read", {"path": "/etc/banip/banip.countries"})[1]["data"])
+        self.assertEqual(call(sid, "uci", "set", {"config": "banip", "section": "global", "values": {
+            "ban_enabled": "1", "ban_feed": ["country"], "ban_country": ["cn", "ru"]}})[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 60}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        self.assertEqual(init("enable")[1]["code"], 0)
+        self.assertEqual(init("restart")[1]["code"], 0)
+        status = json.loads(call(sid, "file", "read", {"path": "/var/run/banIP/banIP.runtime.json"})[1]["data"])
+        self.assertEqual(status["status"], "active")
+        self.assertEqual(init("stop")[1]["code"], 0)
+        self.assertEqual(init("disable"), [6])  # 정해진 명령만 허용
+        self.assertEqual(init("search", "1.2.3.4"), [6])
+
+    def test_wifi_overview_data_and_disconnect(self):
+        """무선 개요: 상태와 접속 기기를 읽고, 배포용 ACL로 기기 연결을 끊을 수 있다."""
+        fake, call, sid, clock = self.make("mt3000")
+        info = call(sid, "iwinfo", "info", {"device": "phy1-ap0"})[1]
+        self.assertTrue(info["bssid"] and info["hardware"]["name"] and info["frequency"])
+        mac = call(sid, "iwinfo", "assoclist", {"device": "phy1-ap0"})[1]["results"][0]["mac"]
+        self.assertEqual(call(sid, "hostapd.phy1-ap0", "del_client",
+                              {"addr": mac, "deauth": True, "reason": 5, "ban_time": 60000}), [0])
+        self.assertEqual(call(sid, "iwinfo", "assoclist", {"device": "phy1-ap0"})[1]["results"], [])
+
+    def test_routing_sections(self):
+        """라우팅 규칙 화면이 쓰는 network 섹션을 배포용 ACL로 만들 수 있다."""
+        fake, call, sid, clock = self.make("dsa4")
+        for type_, values in [
+            ("route", {"interface": "lan", "target": "192.168.50.0/24", "gateway": "192.168.1.2", "metric": "10", "table": "100"}),
+            ("route6", {"interface": "lan", "target": "2001:db8:1::/48", "gateway": "fe80::1"}),
+            ("rule", {"priority": "1000", "src": "192.168.1.0/24", "lookup": "100"}),
+            ("rule6", {"priority": "1000", "src": "2001:db8:1::/64", "action": "prohibit"}),
+        ]:
+            self.assertEqual(call(sid, "uci", "add", {"config": "network", "type": type_, "values": values})[0], 0, type_)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 120}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        types = [s[".type"] for s in call(sid, "uci", "get", {"config": "network"})[1]["values"].values()]
+        for type_ in ("route", "route6", "rule", "rule6"):
+            self.assertIn(type_, types)
+
+    def test_ssh_settings_acl(self):
+        """SSH 설정: dropbear 설정과 공개 키 파일만 쓸 수 있다."""
+        fake, call, sid, clock = self.make("dsa4")
+        keys = "/etc/dropbear/authorized_keys"
+        self.assertEqual(call(sid, "file", "read", {"path": keys}), [4])
+        self.assertEqual(call(sid, "file", "write", {"path": keys, "data": "ssh-ed25519 AAAA test\n", "mode": 384}), [0])
+        self.assertEqual(call(sid, "file", "read", {"path": keys})[1]["data"], "ssh-ed25519 AAAA test\n")
+        self.assertEqual(call(sid, "file", "write", {"path": "/etc/passwd", "data": "x"}), [6])
+        self.assertEqual(call(sid, "file", "write", {"path": "/etc/dropbear/dropbear_ed25519_host_key", "data": "x"}), [6])
+        self.assertEqual(call(sid, "uci", "set", {"config": "dropbear", "section": "main", "values": {"Port": "2222"}})[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 60}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        self.assertEqual(call(sid, "uci", "get", {"config": "dropbear", "section": "main"})[1]["values"]["Port"], "2222")
+
+    def test_missing_package_install_creates_config(self):
+        """DDNS/SQM 패키지가 없는 공유기: 화면의 설치 버튼이 쓰는 apk 명령 뒤에 설정 파일이 생긴다."""
+        clock = Clock()
+        fake = fakeubus.FakeUbus(acl_files=fakeubus.default_acl_files(BASE), password="pw", apply_delay=0,
+                                 clock=clock, log=lambda *a: None, packages=False)
+        call = lambda sid, o, m, a=None: fake.handle(json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "call", "params": [sid, o, m, a or {}]}).encode()).get("result")
+        sid = call(NULL_SID, "session", "login", {"username": "root", "password": "pw"})[1]["ubus_rpc_session"]
+        apk = lambda *p: call(sid, "file", "exec", {"command": "/usr/bin/apk", "params": list(p)})
+        for pkg, config in (("ddns-scripts", "ddns"), ("sqm-scripts", "sqm")):
+            self.assertNotIn(config, call(sid, "uci", "configs")[1]["configs"])
+            self.assertEqual(apk("update")[1]["code"], 0)
+            self.assertEqual(apk("add", pkg)[1]["code"], 0)
+            self.assertIn(config, call(sid, "uci", "configs")[1]["configs"])
+            self.assertEqual(call(sid, "uci", "get", {"config": config})[0], 0)
+
+    def test_interface_and_device_edit(self):
+        """인터페이스 목록의 수정 창이 쓰는 network 옵션을 배포용 ACL로 고칠 수 있다."""
+        fake, call, sid, clock = self.make("dsa4")
+        self.assertEqual(call(sid, "uci", "set", {"config": "network", "section": "wan", "values": {
+            "proto": "static", "ipaddr": "203.0.113.10/24", "gateway": "203.0.113.1", "dns": ["1.1.1.1"], "metric": "10"}})[0], 0)
+        self.assertEqual(call(sid, "uci", "add", {"config": "network", "type": "device", "values": {
+            "name": "lan1", "macaddr": "02:11:22:33:44:55", "mtu": "1400"}})[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 120}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        wan = call(sid, "uci", "get", {"config": "network", "section": "wan"})[1]["values"]
+        self.assertEqual((wan["proto"], wan["gateway"], wan["metric"]), ("static", "203.0.113.1", "10"))
+        net = call(sid, "uci", "get", {"config": "network"})[1]["values"]
+        dev = next(s for s in net.values() if s[".type"] == "device" and s.get("name") == "lan1")
+        self.assertEqual((dev["macaddr"], dev["mtu"]), ("02:11:22:33:44:55", "1400"))
 
     def test_dsa4_ports_and_6ghz(self):
         fake, call, sid, _ = self.make("dsa4")

@@ -67,9 +67,11 @@ function interfacesPage(root) {
         h('td', null, dev),
         h('td', null, i.up ? fmtUptime(i.uptime || 0) : '-'),
         h('td', null, `↓ ${fmtBytes(s.rx_bytes)}`, h('div', { class: 'muted' }, `↑ ${fmtBytes(s.tx_bytes)}`)),
-        h('td', { class: 'actions-cell' }, canRestart
-          ? h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => restart(i.interface) }, '다시 연결')
-          : null));
+        h('td', { class: 'actions-cell' },
+          i.dynamic ? null : h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => editInterface(i.interface, devices, refresh) }, '수정'),
+          canRestart
+            ? h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => restart(i.interface) }, '다시 연결')
+            : null));
     });
     ifCard.replaceChildren(
       h('div', { class: 'card-head' }, h('h3', null, '인터페이스')),
@@ -93,7 +95,7 @@ function interfacesPage(root) {
     devCard.replaceChildren(
       h('div', { class: 'card-head' }, h('h3', null, '장치 (포트)')),
       h('div', { class: 'table-wrap' }, h('table', null,
-        h('thead', null, h('tr', null, ...['장치', '종류', '링크', '속도', 'MAC 주소', '구성', '데이터'].map((x) => h('th', null, x)))),
+        h('thead', null, h('tr', null, ...['장치', '종류', '링크', '속도', 'MAC 주소', '구성', '데이터', ''].map((x) => h('th', null, x)))),
         h('tbody', null, names.map((n) => {
           const d = devices[n];
           const link = !d.present ? ['off', '없음'] : (d.up && d.carrier ? ['ok', '연결됨'] : (d.up ? ['warn', '케이블 없음'] : ['off', '꺼짐']));
@@ -105,7 +107,10 @@ function interfacesPage(root) {
             h('td', null, d.speed ? String(d.speed).replace(/F$/, ' Mbps 전이중').replace(/H$/, ' Mbps 반이중') : '-'),
             h('td', null, d.macaddr || '-'),
             h('td', null, (d['bridge-members'] || []).map(portLabel).join(', ') || (d.parent ? `${portLabel(d.parent)} · VLAN ${d.vid}` : '-')),
-            h('td', null, `↓ ${fmtBytes(s.rx_bytes)}`, h('div', { class: 'muted' }, `↑ ${fmtBytes(s.tx_bytes)}`)));
+            h('td', null, `↓ ${fmtBytes(s.rx_bytes)}`, h('div', { class: 'muted' }, `↑ ${fmtBytes(s.tx_bytes)}`)),
+            h('td', { class: 'actions-cell' }, ['포트', '브리지', 'VLAN'].includes(typeText(d, n))
+              ? h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => editDevice(n, d, refresh) }, '수정')
+              : null));
         })))));
   }
 
