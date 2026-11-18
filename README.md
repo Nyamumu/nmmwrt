@@ -8,6 +8,9 @@ NMMWrt - An easy web interface for OpenWrt configuration.
 - Supports OpenWrt 25+
 - Korean only
 
+## Screenshot
+![NMMWrt system summary page](docs/images/home.webp)
+
 ## Tested
 - GL.iNet GL-MT3000 OpenWrt 25.12.6
 - GL.iNet GL-MT6000 OpenWrt 25.12.6
