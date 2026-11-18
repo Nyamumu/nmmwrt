@@ -182,8 +182,7 @@ const ICONS = {
   home: 'M3 11l9-7l9 7M5 10v10h14V10',
   logout: 'M14 4h5v16h-5M10 8l-4 4l4 4M6 12h10',
   chev: 'M9 6l6 6l-6 6',
-  collapse: 'M17 6l-6 6l6 6M11 6l-6 6l6 6',
-  expand: 'M7 6l6 6l-6 6M13 6l6 6l-6 6',
+  menu: 'M4 6h16M4 12h16M4 18h16',
   sun: 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   moon: 'M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z',
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
@@ -424,8 +423,8 @@ function renderShell() {
   };
   const isFolded = () => (isMobile() ? !shell.classList.contains('mobile-open') : shell.classList.contains('collapsed'));
 
-  const toggleBtn = h('button', { class: 'icon-btn', type: 'button', 'aria-label': '메뉴 접기/펼치기' });
-  const syncToggle = () => toggleBtn.replaceChildren(icon(isFolded() ? 'expand' : 'collapse'));
+  const toggleBtn = h('button', { class: 'icon-btn', type: 'button', 'aria-label': '메뉴 접기/펼치기' }, icon('menu'));
+  const syncToggle = () => toggleBtn.setAttribute('aria-expanded', String(!isFolded()));
   toggleBtn.addEventListener('click', () => {
     if (isMobile()) shell.classList.toggle('mobile-open');
     else {

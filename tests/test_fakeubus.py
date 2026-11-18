@@ -650,6 +650,23 @@ class Profiles(unittest.TestCase):
         self.assertIn("path: '/fw-ipset'", read("app.js"))
         self.assertIn("PAGES['/fw-ipset']", read("fwipset.js"))
 
+    def test_demo_site_build(self):
+        """GitHub Pages 데모: 데모 스크립트가 화면 코드보다 먼저 실행되고 필요한 파일이 모두 들어간다."""
+        import tempfile
+        sys.path.insert(0, os.path.join(BASE, "tools"))
+        import mkdemo
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "site")
+            mkdemo.build(out)
+            with open(os.path.join(out, "index.html"), encoding="utf-8") as f:
+                index = f.read()
+            self.assertLess(index.index("demo/demo.js"), index.index("app.js"))
+            self.assertNotIn("__V__", index)
+            for name in ("app.js", "VERSION", ".nojekyll", "demo/demo.js", "demo/fakeubus.py", "demo/easyui.json"):
+                self.assertTrue(os.path.exists(os.path.join(out, name)), name)
+            with open(os.path.join(out, "demo/easyui.json"), encoding="utf-8") as f:
+                self.assertIn("easyui", json.load(f))
+
     def test_geoblock_acl(self):
         """국가 차단: banip 설정과 정해진 서비스 명령만 쓸 수 있다."""
         fake, call, sid, clock = self.make("dsa4")

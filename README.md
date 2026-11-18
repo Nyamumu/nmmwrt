@@ -8,8 +8,22 @@ NMMWrt - An easy web interface for OpenWrt configuration.
 - Supports OpenWrt 25+
 - Korean only
 
+## Demo
+**[Try the live demo](https://nyamumu.github.io/nmmwrt/)** (login: `root` / `admin`)
+
+The demo runs entirely in your browser with simulated router data. Changes are not saved and reset when the page is reloaded.
+
 ## Screenshot
 ![NMMWrt system summary page](docs/images/home.webp)
+
+## Install
+Connect to your router over SSH and run:
+
+```sh
+uclient-fetch -qO- https://raw.githubusercontent.com/Nyamumu/nmmwrt/release/install.sh | sh
+```
+
+Then open your router's address in a browser and log in with the router's `root` account. Running the same command again updates NMMWrt to the latest version.
 
 ## Tested
 - GL.iNet GL-MT3000 OpenWrt 25.12.6
