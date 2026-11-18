@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NMMWrt</title>
+  <!-- ?v=__V__ 는 deploy.sh가 배포할 때 시각으로 바꾼다. 업데이트 후 브라우저가 옛 파일을 쓰지 않게 하려는 것. -->
+  <link rel="stylesheet" href="app.css?v=__V__">
+</head>
+<body>
+  <div id="app"></div>
+  <!-- 순서대로 실행되는 일반 스크립트(defer). 위 파일의 전역 함수를 아래 파일이 쓴다. main.js가 마지막. -->
+  <script defer src="app.js?v=__V__"></script>
+  <script defer src="lan.js?v=__V__"></script>
+  <script defer src="network.js?v=__V__"></script>
+  <script defer src="vlan.js?v=__V__"></script>
+  <script defer src="ipv6.js?v=__V__"></script>
+  <script defer src="wireless.js?v=__V__"></script>
+  <script defer src="guest.js?v=__V__"></script>
+  <script defer src="firewall.js?v=__V__"></script>
+  <script defer src="fwsettings.js?v=__V__"></script>
+  <script defer src="fwrules.js?v=__V__"></script>
+  <script defer src="fwnat.js?v=__V__"></script>
+  <script defer src="system.js?v=__V__"></script>
+  <script defer src="leds.js?v=__V__"></script>
+  <script defer src="asu.js?v=__V__"></script>
+  <script defer src="nmmupdate.js?v=__V__"></script>
+  <script defer src="services.js?v=__V__"></script>
+  <script defer src="software.js?v=__V__"></script>
+  <script defer src="addons.js?v=__V__"></script>
+  <script defer src="main.js?v=__V__"></script>
+</body>
+</html>

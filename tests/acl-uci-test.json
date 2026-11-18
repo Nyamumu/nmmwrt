@@ -1,0 +1,13 @@
+{
+	"easyui-test-uci": {
+		"description": "테스트 전용: 2단계에서 쓸 법한 uci 권한 (실제 배포 ACL에는 넣지 않았다)",
+		"read": {
+			"ubus": { "uci": [ "get", "changes", "configs" ] },
+			"uci": [ "network", "wireless", "dhcp" ]
+		},
+		"write": {
+			"ubus": { "uci": [ "set", "add", "delete", "revert", "commit", "apply", "confirm", "rollback" ] },
+			"uci": [ "network", "wireless", "dhcp" ]
+		}
+	}
+}

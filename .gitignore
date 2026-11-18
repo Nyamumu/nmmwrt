@@ -1,0 +1,9 @@
+# 빌드 결과
+dist/
+preview.html
+__pycache__/
+*.pyc
+
+# 공개 저장소에 올리지 않는 개인 작업 메모와 공유기 주소
+CLAUDE.md
+deploy-all.sh

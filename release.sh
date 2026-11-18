@@ -1,0 +1,19 @@
+#!/bin/sh
+# 사용법: ./release.sh   -> dist/에 nmmwrt.tar.gz와 latest.json을 만든다.
+# GitHub에 올리기: gh release create v<버전> dist/nmmwrt.tar.gz dist/latest.json --title "NMMWrt <버전>"
+set -e
+cd "$(dirname "$0")"
+[ -f release.conf ] || { echo "release.conf가 없습니다. REPO=owner/name 을 적어 주세요." >&2; exit 1; }
+
+V="$(cat VERSION)" # 새 버전을 낼 때는 VERSION 파일의 숫자를 올린다
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+sh tools/mkstage.sh "$STAGE" "$(date +%Y%m%d%H%M%S)"
+
+rm -rf dist
+mkdir -p dist
+tar -C "$STAGE" --owner=0 --group=0 -czf dist/nmmwrt.tar.gz www usr lib
+SHA="$(sha256sum dist/nmmwrt.tar.gz | cut -d' ' -f1)"
+printf '{"version":"%s","sha256":"%s"}\n' "$V" "$SHA" > dist/latest.json
+echo "버전 $V"
+echo "sha256 $SHA"

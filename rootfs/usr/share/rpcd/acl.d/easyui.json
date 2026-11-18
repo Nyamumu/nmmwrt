@@ -1,0 +1,62 @@
+{
+	"easyui": {
+		"description": "NMMWrt 관리 UI",
+		"read": {
+			"ubus": {
+				"system": [ "info", "board" ],
+				"rpc-sys": [ "packagelist" ],
+				"network.interface": [ "dump" ],
+				"network.device": [ "status" ],
+				"network.wireless": [ "status" ],
+				"file": [ "read", "list" ],
+				"session": [ "destroy" ],
+				"uci": [ "get", "changes", "configs" ],
+				"log": [ "read" ],
+				"iwinfo": [ "devices", "phyname", "info", "txpowerlist", "countrylist", "assoclist" ]
+			},
+			"uci": [ "network", "dhcp", "wireless", "firewall", "system", "ddns", "sqm", "attendedsysupgrade" ],
+			"file": {
+				"/tmp/dhcp.leases": [ "read" ],
+				"/etc/board.json": [ "read" ],
+				"/usr/share/luci/menu.d": [ "list" ],
+				"/usr/share/luci/menu.d/*": [ "read" ],
+				"/lib/apk/db/installed": [ "read" ],
+				"/usr/bin/apk list *": [ "exec" ],
+				"/usr/libexec/nmmwrt-update check": [ "exec" ],
+				"/sys/class/leds": [ "list" ],
+				"/sys/class/leds/*/trigger": [ "read" ],
+				"/sys/devices/*/trigger": [ "read" ],
+				"/sys/class/net/*/brforward": [ "read" ],
+				"/sys/class/net/*/brif": [ "list" ],
+				"/sys/class/net/*/brif/*/port_no": [ "read" ],
+				"/sys/devices/*/brforward": [ "read" ],
+				"/sys/devices/*/brif": [ "list" ],
+				"/sys/devices/*/brport/port_no": [ "read" ]
+			},
+			"cgi-io": [ "backup" ]
+		},
+		"write": {
+			"ubus": {
+				"uci": [ "set", "add", "delete", "revert", "apply", "confirm", "rollback" ],
+				"rpc-sys": [ "password_set", "factory", "upgrade_start" ],
+				"system": [ "reboot", "validate_firmware_image" ],
+				"network.interface.*": [ "up", "down" ],
+				"file": [ "exec" ]
+			},
+			"uci": [ "network", "dhcp", "wireless", "firewall", "system", "ddns", "sqm" ],
+			"file": {
+				"/tmp/firmware.bin": [ "write" ],
+				"/tmp/backup.tar.gz": [ "write" ],
+				"/sbin/sysupgrade --restore-backup /tmp/backup.tar.gz": [ "exec" ],
+				"/etc/init.d/led restart": [ "exec" ],
+				"/usr/libexec/nmmwrt-update install": [ "exec" ],
+				"/tmp/upload.apk": [ "write" ],
+				"/usr/bin/apk update": [ "exec" ],
+				"/usr/bin/apk add *": [ "exec" ],
+				"/usr/bin/apk del *": [ "exec" ],
+				"/usr/bin/apk upgrade *": [ "exec" ]
+			},
+			"cgi-io": [ "upload" ]
+		}
+	}
+}
