@@ -13,12 +13,8 @@ sys.path.insert(0, '/demo')
 import fakeubus
 
 class DemoUbus(fakeubus.FakeUbus):
-    # 데모에는 LuCI가 없으므로 추가 기능과 LuCI로 이동 메뉴를 숨긴다
-    LUCI_MENU = {}
-    def file_list(self, sid, args):
-        if str(args.get('path', '')).rstrip('/') == self.LUCI_MENU_DIR:
-            raise fakeubus.Status(fakeubus.UBUS_NOT_FOUND)
-        return super().file_list(sid, args)
+    # LuCI로 이동 메뉴는 보이고, LuCI 서비스가 필요한 추가 기능 메뉴는 숨긴다
+    LUCI_MENU = {'luci-base.json': {}}
 
 fake = DemoUbus(acl_files=['/demo/easyui.json'], password='admin', apply_delay=1.5, log=lambda *a: None, profile='mt3000')
 
@@ -73,6 +69,12 @@ def demo_upload(sid, path, data):
       const pw = document.querySelector('.login-card input[type=password]');
       if (pw && !pw.dataset.demo) { pw.dataset.demo = '1'; pw.value = 'admin'; }
     }).observe(document.body, { childList: true, subtree: true });
+    // 데모에는 LuCI가 없으므로 새 탭을 여는 대신 안내한다
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('a.luci-link')) return;
+      ev.preventDefault();
+      window.infoModal('LuCI로 이동', '데모에서는 지원하지 않습니다.');
+    }, true);
   }
   if (document.body) showShell(); else document.addEventListener('DOMContentLoaded', showShell, { once: true });
 
