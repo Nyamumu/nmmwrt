@@ -32,19 +32,22 @@ function nmmVersionText(v) {
 function nmmFirstBootScript(n) {
   return `#!/bin/sh
 [ -f /www/nmm/VERSION ] && exit 0
-U='https://github.com/${n.repo}/releases/download/v${n.latest}/nmmwrt.tar.gz'
+A='https://raw.githubusercontent.com/${n.repo}/release/nmmwrt-${n.latest}.tar.gz'
+B='https://github.com/${n.repo}/releases/download/v${n.latest}/nmmwrt.tar.gz'
 S='${n.sha256}'
 (
 n=0
 while [ $n -lt 120 ]; do
   n=$((n+1)); sleep 15
-  if uclient-fetch -q -T 60 -O /tmp/nmmwrt.tgz "$U" && [ "$(sha256sum /tmp/nmmwrt.tgz | cut -d' ' -f1)" = "$S" ]; then
-    if [ -f /www/index.html ] && ! grep -q NMMWRT-ROOT /www/index.html; then cp /www/index.html /www/index.html.luci; fi
-    tar -xzf /tmp/nmmwrt.tgz -C / && /etc/init.d/rpcd reload
+  for U in "$A" "$B"; do
+    if uclient-fetch -q -T 20 -O /tmp/nmmwrt.tgz "$U" && [ "$(sha256sum /tmp/nmmwrt.tgz | cut -d' ' -f1)" = "$S" ]; then
+      if [ -f /www/index.html ] && ! grep -q NMMWRT-ROOT /www/index.html; then cp /www/index.html /www/index.html.luci; fi
+      tar -xzf /tmp/nmmwrt.tgz -C / && /etc/init.d/rpcd reload
+      rm -f /tmp/nmmwrt.tgz
+      exit 0
+    fi
     rm -f /tmp/nmmwrt.tgz
-    exit 0
-  fi
-  rm -f /tmp/nmmwrt.tgz
+  done
 done
 ) </dev/null >/dev/null 2>&1 &
 exit 0
