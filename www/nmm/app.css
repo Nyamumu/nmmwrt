@@ -264,6 +264,8 @@ td.actions-cell .btn + .btn { margin-left: 4px; }
 .days { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .days label { display: flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--input-line); border-radius: 999px; font-size: 13px; cursor: pointer; }
 .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* 버튼 바로 아래에 나오는 결과 문구가 버튼에 붙지 않게 한다 */
+.actions + .msg, .actions + div > .msg:first-child { margin-top: 12px; }
 .status-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .logbox { margin: 0; max-height: 60vh; overflow: auto; padding: 10px; background: var(--bg); border-radius: var(--radius); font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cmd { display: block; margin: 6px 0 0; padding: 8px 10px; background: var(--bg); border-radius: var(--radius); font: 13px ui-monospace, Consolas, monospace; overflow-x: auto; }
