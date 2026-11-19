@@ -37,10 +37,11 @@ function systemPage(root) {
   let alive = true;
 
   async function load() {
-    let sections, info, devs;
+    let sections, info, devs, uhttpd, apkDb;
     try {
-      [sections, info, devs] = await Promise.all([uciSections('system'), ubus('system', 'info').catch(() => null),
-        ubus('network.device', 'status').catch(() => ({})), readBoard()]);
+      [sections, info, devs, uhttpd, apkDb] = await Promise.all([uciSections('system'), ubus('system', 'info').catch(() => null),
+        ubus('network.device', 'status').catch(() => ({})), uciSections('uhttpd').catch(() => null),
+        ubus('file', 'read', { path: APK_DB }).then((d) => d.data, () => null), readBoard()]);
     } catch (e) {
       const text = await loadFailureText(e);
       if (alive && text) body.replaceChildren(messageCard(text));
@@ -51,10 +52,62 @@ function systemPage(root) {
     if (!sys) { body.replaceChildren(messageCard('시스템 설정을 찾을 수 없습니다.')); return; }
     // LED 네트워크 활동 표시에 고를 장치: 실제 포트/브리지/무선 장치 (lo 제외)
     const devNames = Object.keys(devs || {}).filter((n) => n !== 'lo').sort();
-    render(sys, (sections || []).find((s) => s['.type'] === 'timeserver'), info, sections || [], devNames);
+    const web = (uhttpd || []).find((s) => s['.type'] === 'uhttpd' && s['.name'] === 'main') || (uhttpd || []).find((s) => s['.type'] === 'uhttpd');
+    render(sys, (sections || []).find((s) => s['.type'] === 'timeserver'), info, sections || [], devNames, web, apkDb);
   }
 
-  function render(sys, ntp, info, sections, devNames) {
+  // HTTPS: uhttpd의 listen_https(443 포트)와 redirect_https(HTTP -> HTTPS 자동 이동).
+  // 자동 이동은 HTTPS로 접속한 상태에서만 켤 수 있다: HTTP 화면에서 켜면 적용 확인 요청까지 HTTPS로 넘어가
+  // (인증서를 아직 받아들이지 않았으면) 확인하지 못하고 자동으로 되돌아간다. 같은 이유로 HTTPS 화면에서는 HTTPS를 끌 수 없다.
+  function httpsCard(web, apkDb) {
+    const head = h('div', { class: 'card-head' }, h('h3', null, 'HTTPS 보안 접속'));
+    if (!web) return h('section', { class: 'card form-card' }, head, h('p', { class: 'muted' }, '웹 서버(uhttpd) 설정을 찾을 수 없습니다.'));
+    const pkgs = apkDb == null ? null : parseApkDb(apkDb).map((p) => p.name);
+    const hasTls = !pkgs || pkgs.some((n) => /^libustream-(mbedtls|openssl|wolfssl)/.test(n));
+    const hasCertTool = !pkgs || pkgs.some((n) => /^(px5g|openssl-util)/.test(n));
+    if (!hasTls || !hasCertTool) return missingPackageCard('libustream-mbedtls px5g-mbedtls', 'HTTPS', () => { if (alive) load(); });
+
+    const listenOn = asList(web.listen_https).length > 0;
+    const redirectOn = web.redirect_https === '1' || web.redirect_https === 'on';
+    const onHttps = location.protocol === 'https:';
+    const httpsUrl = `https://${location.hostname}${location.pathname}`;
+    const listen = toggleEl(listenOn, 'HTTPS 접속 사용 (443 포트)');
+    const redirect = toggleEl(redirectOn, 'HTTP로 접속하면 HTTPS로 자동 이동');
+    listen.input.disabled = onHttps && listenOn;
+    redirect.input.disabled = !onHttps && !redirectOn;
+    const sync = () => {
+      if (!listen.input.checked) redirect.input.checked = false;
+      redirect.input.disabled = !listen.input.checked || (!onHttps && !redirectOn);
+    };
+    listen.input.addEventListener('change', sync);
+    sync();
+    const applyBtn = h('button', { class: 'btn btn-inline', type: 'button' }, '적용');
+    applyBtn.addEventListener('click', async () => {
+      const values = {};
+      if (listen.input.checked !== listenOn) values.listen_https = listen.input.checked ? ['0.0.0.0:443', '[::]:443'] : '';
+      if (redirect.input.checked !== redirectOn) values.redirect_https = redirect.input.checked ? '1' : '0';
+      if (!Object.keys(values).length) { infoModal('설정 적용', '바뀐 내용이 없습니다.'); return; }
+      applyBtn.disabled = true;
+      const r = await runApply([{ op: 'set', config: 'uhttpd', section: web['.name'], values }]);
+      applyBtn.disabled = false;
+      if (r === 'applied' && values.listen_https) {
+        infoModal('HTTPS 보안 접속', `이제 ${httpsUrl} 로 접속할 수 있습니다. 공유기가 직접 만든 인증서라 처음 접속할 때 브라우저에 보안 경고가 나오면 계속 진행을 눌러 주세요.`);
+      }
+      if (alive && (r === 'applied' || r === 'rolledback')) load();
+    });
+    return h('section', { class: 'card form-card' },
+      h('div', { class: 'card-head' }, h('h3', null, 'HTTPS 보안 접속'),
+        h('span', { class: 'pill ' + (listenOn ? 'ok' : 'off') }, listenOn ? (redirectOn ? 'HTTPS만 사용' : '사용 중') : '꺼짐')),
+      h('p', { class: 'muted' }, '관리 화면과 주고받는 내용을 암호화합니다. 공유기가 직접 만든 인증서를 쓰므로 처음 접속할 때 브라우저에 보안 경고가 나올 수 있습니다.'),
+      listen.el,
+      onHttps && listenOn ? h('p', { class: 'muted' }, 'HTTPS로 접속한 상태에서는 HTTPS를 끌 수 없습니다. HTTP 주소로 접속해서 꺼 주세요.') : null,
+      redirect.el,
+      !onHttps && !redirectOn ? h('p', { class: 'muted' }, '자동 이동은 HTTPS 주소로 접속한 상태에서만 켤 수 있습니다. ',
+        listenOn ? h('a', { href: httpsUrl }, 'HTTPS로 접속하기') : 'HTTPS 접속을 먼저 켜 주세요.') : null,
+      h('div', { class: 'actions' }, applyBtn));
+  }
+
+  function render(sys, ntp, info, sections, devNames, web, apkDb) {
     const host = h('input', { type: 'text', value: sys.hostname || 'OpenWrt', spellcheck: 'false' });
     const zoneOpts = TIMEZONES.map(([z, , label]) => [z, label]);
     const zone = selectEl(zoneOpts, sys.zonename || 'UTC');
@@ -94,6 +147,7 @@ function systemPage(root) {
         h('div', { class: 'fieldset' }, fHost.el, fZone.el),
         ntp ? ntpT.el : null,
         h('div', { class: 'actions' }, applyBtn)),
+      httpsCard(web, apkDb),
       ledCard(sections, devNames, () => { if (alive) load(); }),
     );
   }

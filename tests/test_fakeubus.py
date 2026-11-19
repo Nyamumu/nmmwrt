@@ -357,7 +357,7 @@ class Uci(Base):
         self.assertEqual(self.call(sid, "uci", "get", {"config": "luci"}), [6])  # uci 범위 밖
         # 실제 rpcd: 읽기 권한과 상관없이 전체 목록
         self.assertEqual(self.call(sid, "uci", "configs")[1]["configs"],
-                         ["banip", "ddns", "dhcp", "dropbear", "firewall", "network", "sqm", "system", "wireless"])
+                         ["banip", "ddns", "dhcp", "dropbear", "firewall", "network", "sqm", "system", "uhttpd", "wireless"])
 
     def test_get_shapes(self):
         sid = self.login()
@@ -649,6 +649,23 @@ class Profiles(unittest.TestCase):
         self.assertIn('src="fwipset.js?v=__V__"', read("index.html"))
         self.assertIn("path: '/fw-ipset'", read("app.js"))
         self.assertIn("PAGES['/fw-ipset']", read("fwipset.js"))
+
+    def test_https_and_repo_keys_acl(self):
+        """HTTPS 설정(uhttpd)과 저장소 공개 키(/etc/apk/keys)를 배포용 ACL로 다룰 수 있고, 그 밖의 파일은 지울 수 없다."""
+        fake, call, sid, clock = self.make("mt3000")
+        main = call(sid, "uci", "get", {"config": "uhttpd", "section": "main"})[1]["values"]
+        self.assertEqual(main["listen_https"], ["0.0.0.0:443", "[::]:443"])
+        self.assertEqual(call(sid, "uci", "set", {"config": "uhttpd", "section": "main", "values": {"redirect_https": "1"}})[0], 0)
+        self.assertEqual(call(sid, "uci", "apply", {"rollback": True, "timeout": 60}), [0])
+        self.assertEqual(call(sid, "uci", "confirm"), [0])
+        keys = "/etc/apk/keys"
+        self.assertEqual([e["name"] for e in call(sid, "file", "list", {"path": keys})[1]["entries"]], ["openwrt-25.12.pem"])
+        pem = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
+        self.assertEqual(call(sid, "file", "write", {"path": keys + "/my-repo.pem", "data": pem, "mode": 420}), [0])
+        self.assertEqual(call(sid, "file", "read", {"path": keys + "/my-repo.pem"})[1]["data"], pem)
+        self.assertEqual(call(sid, "file", "remove", {"path": keys + "/my-repo.pem"}), [0])
+        self.assertEqual(call(sid, "file", "remove", {"path": "/etc/passwd"}), [6])
+        self.assertEqual(call(sid, "file", "write", {"path": "/etc/apk/repositories.d/x.list", "data": "x"}), [6])
 
     def test_demo_site_build(self):
         """GitHub Pages 데모: 데모 스크립트가 화면 코드보다 먼저 실행되고 필요한 파일이 모두 들어간다."""

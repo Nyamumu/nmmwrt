@@ -12,7 +12,7 @@ function missingPackageCard(pkg, what, reload) {
     installBtn.disabled = true;
     const done = await apkRunSteps(`${pkg} 설치`, [
       { label: '패키지 목록을 받는', params: ['update'] },
-      { label: `${pkg} 패키지를 설치하는`, params: ['add', pkg] },
+      { label: `${pkg} 패키지를 설치하는`, params: ['add', ...pkg.split(' ')] },
     ]);
     installBtn.disabled = false;
     if (done) reload();

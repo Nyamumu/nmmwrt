@@ -9,6 +9,9 @@ const APK_DB = '/lib/apk/db/installed';
 const APK_UPLOAD = '/tmp/upload.apk';
 const APK_TIMEOUT_MS = 180000; // 목록 받기/설치는 인터넷 속도에 따라 오래 걸릴 수 있다
 const PKG_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+const APK_KEYS_DIR = '/etc/apk/keys';
+const APK_KEY_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/;
+const APK_KEY_RE = /^-----BEGIN PUBLIC KEY-----\n[A-Za-z0-9+/=\n]+\n-----END PUBLIC KEY-----$/;
 const PKG_PAGE = 100;
 
 function apkExec(params) {
@@ -139,6 +142,92 @@ function softwarePage(root) {
     if (await run(`'${name}' 업그레이드`, ['upgrade', name])) { cache.updates = null; load(); }
   }
 
+  /* ---------- 저장소 공개 키 (/etc/apk/keys/*.pem) ---------- */
+  // apk는 이 폴더의 키로 패키지 목록과 패키지의 서명을 확인한다. 다른 저장소를 쓸 때 그 저장소의 공개 키를 등록한다.
+
+  async function readKeys() {
+    const entries = (await ubus('file', 'list', { path: APK_KEYS_DIR })).entries || [];
+    const names = entries.filter((e) => e.type === 'file' && /\.pem$/.test(e.name)).map((e) => e.name).sort();
+    const texts = await Promise.all(names.map((n) => ubus('file', 'read', { path: `${APK_KEYS_DIR}/${n}` }).then((d) => d.data || '', () => '')));
+    return names.map((name, i) => ({ name, text: texts[i].trim() }));
+  }
+
+  async function openKeys(message) {
+    let keys;
+    try {
+      keys = await readKeys();
+    } catch (e) {
+      if (await handleDenied(e) === 'expired') return;
+      infoModal('저장소 공개 키', e instanceof RpcError && e.code === UBUS_PERMISSION_DENIED
+        ? '공개 키를 읽을 권한이 없습니다. 최신 NMMWrt를 다시 설치해 주세요.' : '공개 키 목록을 읽지 못했습니다.', true);
+      return;
+    }
+    const keyPart = (text) => {
+      const body = text.split('\n').filter((l) => !l.startsWith('-----')).join('');
+      return body ? `${body.slice(0, 16)}…${body.slice(-12)}` : '(내용 없음)';
+    };
+    const rows = keys.map((k) => h('tr', null,
+      h('td', null, h('b', null, k.name), /^openwrt-/.test(k.name) ? h('div', { class: 'muted' }, 'OpenWrt 공식 키') : null),
+      h('td', { class: 'pkg-desc' }, keyPart(k.text)),
+      h('td', { class: 'actions-cell' }, h('button', { class: 'btn btn-ghost btn-small', type: 'button', onclick: () => removeKey(k) }, '삭제'))));
+
+    const name = h('input', { type: 'text', spellcheck: 'false', placeholder: '예: my-repo' });
+    const pem = h('textarea', { rows: '5', spellcheck: 'false', placeholder: '-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----' });
+    const fName = formField('키 이름', name, '영문, 숫자, . _ - (파일 이름이 됩니다. .pem은 자동으로 붙습니다)');
+    const fPem = formField('공개 키 (PEM)', pem);
+    const addBtn = h('button', { class: 'btn', type: 'button' }, '등록');
+    addBtn.addEventListener('click', async () => {
+      fName.setError(null);
+      fPem.setError(null);
+      const base = name.value.trim().replace(/\.pem$/i, '');
+      const text = pem.value.replace(/\r/g, '').trim().split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+      let bad = false;
+      if (!APK_KEY_NAME_RE.test(base)) { fName.setError('영문이나 숫자로 시작하는 1~60자 (영문, 숫자, . _ -)'); bad = true; }
+      else if (keys.some((k) => k.name === `${base}.pem`)) { fName.setError('같은 이름의 키가 이미 있습니다'); bad = true; }
+      if (/PRIVATE KEY/.test(text)) { fPem.setError('개인 키입니다. 저장소의 공개 키를 넣어 주세요'); bad = true; }
+      else if (!APK_KEY_RE.test(text)) { fPem.setError('-----BEGIN PUBLIC KEY-----로 시작하는 공개 키를 넣어 주세요'); bad = true; }
+      else if (keys.some((k) => k.text === text)) { fPem.setError('이미 등록된 키입니다'); bad = true; }
+      if (bad) return;
+      addBtn.disabled = true;
+      try {
+        await ubus('file', 'write', { path: `${APK_KEYS_DIR}/${base}.pem`, data: `${text}\n`, mode: 0o644 });
+      } catch (e) {
+        addBtn.disabled = false;
+        if (await handleDenied(e) !== 'expired') fPem.setError('키를 저장하지 못했습니다. 최신 NMMWrt가 설치되어 있는지 확인해 주세요');
+        return;
+      }
+      openKeys(`'${base}.pem' 키를 등록했습니다. 새 저장소를 쓰려면 "목록 새로 받기"를 눌러 주세요.`);
+    });
+
+    showModal(h('h3', null, '저장소 공개 키'),
+      h('p', { class: 'muted' }, '패키지 저장소의 서명을 확인하는 공개 키입니다. 믿을 수 있는 저장소의 키만 등록하세요.'),
+      message ? h('p', { class: 'msg ok-msg' }, message) : null,
+      h('div', { class: 'table-wrap' }, h('table', null,
+        h('thead', null, h('tr', null, ...['이름', '키', ''].map((x) => h('th', null, x)))),
+        h('tbody', null, rows.length ? rows : h('tr', null, h('td', { colspan: 3, class: 'muted' }, '등록된 공개 키가 없습니다.'))))),
+      h('div', { class: 'card-head', style: 'margin-top:14px' }, h('h3', null, '키 등록')),
+      fName.el, fPem.el,
+      h('div', { class: 'actions' }, h('button', { class: 'btn btn-ghost', type: 'button', onclick: closeModal }, '닫기'), addBtn));
+  }
+
+  async function removeKey(k) {
+    const official = /^openwrt-/.test(k.name);
+    const ok = await confirmDialog('공개 키 삭제', [
+      `'${k.name}' 키를 삭제합니다.`,
+      h('p', { class: 'msg warn-msg' }, official
+        ? 'OpenWrt 공식 키입니다. 삭제하면 패키지 목록을 받거나 패키지를 설치할 수 없게 됩니다.'
+        : '이 키로 서명한 저장소의 패키지를 더 이상 설치할 수 없게 됩니다.'),
+    ], '삭제', true);
+    if (!ok) { openKeys(); return; }
+    try {
+      await ubus('file', 'remove', { path: `${APK_KEYS_DIR}/${k.name}` });
+    } catch (e) {
+      if (await handleDenied(e) !== 'expired') infoModal('공개 키 삭제', '키를 삭제하지 못했습니다. 최신 NMMWrt가 설치되어 있는지 확인해 주세요.', true);
+      return;
+    }
+    openKeys(`'${k.name}' 키를 삭제했습니다.`);
+  }
+
   /* ---------- 설치 가능 / 업데이트 목록 (apk 실행) ---------- */
 
   const cache = { search: null, updates: null };
@@ -208,7 +297,8 @@ function softwarePage(root) {
         : h('p', { class: 'muted' }, '저장 공간 정보를 읽지 못했습니다.'),
       h('div', { class: 'sw-tools' },
         h('div', { class: 'sw-install' }, fName.el, installBtn),
-        h('div', { class: 'actions', style: 'margin:0' }, updateBtn, uploadBtn, file)),
+        h('div', { class: 'actions', style: 'margin:0' }, updateBtn, uploadBtn,
+          h('button', { class: 'btn btn-ghost btn-inline', type: 'button', onclick: () => openKeys() }, '저장소 공개 키'), file)),
       h('p', { class: 'muted' }, '패키지 설치/삭제는 시스템을 망가뜨릴 수 있습니다. 설치 전에 "목록 새로 받기"를 먼저 해 주세요.'));
   }
 

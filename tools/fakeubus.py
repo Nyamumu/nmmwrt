@@ -189,6 +189,9 @@ def default_uci(profile="mt3000"):
               server=["0.openwrt.pool.ntp.org", "1.openwrt.pool.ntp.org"]),
         ],
         "dropbear": [S("dropbear", "main", enable="1", PasswordAuth="on", RootPasswordAuth="on", Port="22")],
+        # 25.12 기본: HTTPS(443)도 열려 있고 HTTP는 HTTPS로 넘기지 않는다
+        "uhttpd": [S("uhttpd", "main", listen_http=["0.0.0.0:80", "[::]:80"], listen_https=["0.0.0.0:443", "[::]:443"],
+                     redirect_https="0", home="/www", cert="/etc/uhttpd.crt", key="/etc/uhttpd.key")],
         "banip": [S("banip", "global", ban_enabled="0", ban_debug="0", ban_autodetect="1")],
         # 아래 두 개는 실제로는 ddns-scripts / sqm-scripts 패키지를 깔아야 생긴다 (--no-packages로 없앨 수 있다)
         "ddns": [
@@ -357,6 +360,9 @@ class FakeUbus:
         self.running = copy.deepcopy(self.committed)   # 마지막으로 적용된 설정
         self.files = {}                                # cgi-upload로 올라온 파일 (경로 -> bytes)
         self.kicked = set()                            # 연결 끊기를 한 무선 기기
+        self.files[self.APK_KEYS + "/openwrt-25.12.pem"] = (  # 25.12 기본 저장소 공개 키
+            b"-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAECqruC4JU7pfpnkQuueBaT29I1dFx\n"
+            b"Xbc7xYsY5R2+r3Hg3SO3B2QLpMaghA9Uzx/E2PGaNkYe24uPPg/n7Q9Jeg==\n-----END PUBLIC KEY-----\n")
         self.logs = []                                 # 시스템 로그 (log read)
         self._log_event("procd: - init complete -")
         self._log_event("netifd: Interface 'wan' is now up")
@@ -389,7 +395,8 @@ class FakeUbus:
             "network.device": {"status": self.device_status},
             # 실기기(25.12.6): uhttpd가 세션 인자를 덧붙여서 웹에서는 항상 [2]. UI는 iwinfo + uci로 대신한다.
             "network.wireless": {"status": self.wireless_status_web},
-            "file": {"read": self.file_read, "write": self.file_write, "exec": self.file_exec, "list": self.file_list},
+            "file": {"read": self.file_read, "write": self.file_write, "exec": self.file_exec, "list": self.file_list,
+                     "remove": self.file_remove},
             "rpc-sys": {"password_set": self.password_set, "factory": self.factory,
                         "upgrade_start": self.upgrade_start,
                         "packagelist": lambda sid, args: {"packages": {n: v[0] for n, v in sorted(self._apk_state().items())}}},
@@ -651,6 +658,8 @@ class FakeUbus:
         "luci-app-firewall": ("25.290.1-r1", "Firewall and port forwarding configuration", 81920),
         "tailscale": ("1.88.3-r1", "It creates a secure network between your servers, computers, and cloud instances.", 33554432),
         "uhttpd": ("2025.07.06-r1", "uHTTPd is a tiny single threaded HTTP server.", 81920),
+        "libustream-mbedtls20201210": ("2026.03.01~99f1c0db-r1", "ustream SSL Library (mbedtls)", 20480),
+        "px5g-mbedtls": ("13", "Px5g is a tiny standalone X.509 certificate generator.", 10240),
     }
     APK_REPO = {
         "base-files": ("1659-r1", ""), "busybox": ("1.37.0-r5", ""), "dnsmasq": ("2.91-r2", ""),
@@ -1308,6 +1317,9 @@ class FakeUbus:
             raise Status(UBUS_PERMISSION_DENIED)
         if path.rstrip("/") == "/sys/class/leds":
             return {"entries": [{"name": n, "type": "symlink"} for n in self.LEDS]}
+        if path.rstrip("/") == self.APK_KEYS:
+            names = sorted(p.rsplit("/", 1)[1] for p in self.files if p.startswith(self.APK_KEYS + "/"))
+            return {"entries": [{"name": n, "type": "file"} for n in names]}
         if path.rstrip("/") == self.LUCI_MENU_DIR:
             if not self.packages:
                 raise Status(UBUS_NOT_FOUND)
@@ -1319,6 +1331,18 @@ class FakeUbus:
         return {"entries": [{"name": n, "type": "symlink"} for n in members]}
 
     SSH_KEYS = "/etc/dropbear/authorized_keys"
+    APK_KEYS = "/etc/apk/keys"
+
+    def file_remove(self, sid, args):
+        path = args.get("path")
+        if not isinstance(path, str):
+            raise Status(UBUS_INVALID_ARGUMENT)
+        if not self._file_ok(sid, path, "write"):
+            raise Status(UBUS_PERMISSION_DENIED)
+        if path not in self.files:
+            raise Status(UBUS_NOT_FOUND)
+        del self.files[path]
+        return None
 
     def file_write(self, sid, args):
         path, data = args.get("path"), args.get("data")
@@ -1344,6 +1368,10 @@ class FakeUbus:
             files["/etc/banip/banip.countries"] = lambda: self.BANIP_COUNTRIES
             if getattr(self, "banip_status", None):
                 files["/var/run/banIP/banIP.runtime.json"] = lambda: json.dumps(self.banip_status)
+        if path.startswith(self.APK_KEYS + "/"):
+            if path not in self.files:
+                raise Status(UBUS_NOT_FOUND)
+            return {"data": self.files[path].decode()}
         if path == self.SSH_KEYS:  # 공개 키를 저장한 적이 없으면 파일이 없다
             if path not in self.files:
                 raise Status(UBUS_NOT_FOUND)
