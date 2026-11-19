@@ -635,8 +635,8 @@ class FakeUbus:
                 self.banip_status = {"status": "stopped", "element_count": "0", "active_feeds": [], "last_run": "-"}
             return {"code": 0, "stdout": ""}
         if cmd == "/usr/libexec/nmmwrt-update":
-            # 가짜 업데이트: 새 버전이 하나 있고, 설치하면 최신이 된다
-            latest = "1.0.15"
+            # 가짜 업데이트: 새 버전이 하나 있고, 설치하면 최신이 된다 (데모는 nmm_latest와 nmm_version을 같게 둬서 최신으로 보인다)
+            latest = getattr(self, "nmm_latest", "1.0.15")
             cur = getattr(self, "nmm_version", "1.0.14")
             if params == ["install"]:
                 self.nmm_version = cur = latest

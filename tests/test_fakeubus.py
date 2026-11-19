@@ -679,6 +679,10 @@ class Profiles(unittest.TestCase):
                 index = f.read()
             self.assertLess(index.index("demo/demo.js"), index.index("app.js"))
             self.assertNotIn("__V__", index)
+            with open(os.path.join(out, "demo/demo.js"), encoding="utf-8") as f:
+                demo = f.read()
+            self.assertNotIn("__V__", demo)
+            self.assertIn("fake.nmm_version = fake.nmm_latest = '%s'" % mkdemo.read("VERSION").strip(), demo)
             for name in ("app.js", "VERSION", ".nojekyll", "demo/demo.js", "demo/fakeubus.py", "demo/easyui.json"):
                 self.assertTrue(os.path.exists(os.path.join(out, name)), name)
             with open(os.path.join(out, "demo/easyui.json"), encoding="utf-8") as f:

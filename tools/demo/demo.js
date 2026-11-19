@@ -17,6 +17,8 @@ class DemoUbus(fakeubus.FakeUbus):
     LUCI_MENU = {'luci-base.json': {}}
 
 fake = DemoUbus(acl_files=['/demo/easyui.json'], password='admin', apply_delay=1.5, log=lambda *a: None, profile='mt3000')
+# 데모는 항상 최신 버전이다 (NMMWrt 업데이트 카드에 새 버전이 뜨지 않게)
+fake.nmm_version = fake.nmm_latest = '__V__'
 
 def demo_ubus(body):
     return json.dumps(fake.handle(body.encode('utf-8')), ensure_ascii=False)
