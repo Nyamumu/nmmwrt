@@ -12,7 +12,7 @@
   --session-timeout N    세션 유효 시간 상한(초). 만료 처리를 빨리 확인할 때 쓴다
   --acl 파일.json        rootfs의 ACL에 더해 읽을 ACL (여러 번 쓸 수 있다)
   --no-packages          ddns-scripts, sqm-scripts가 설치되지 않은 공유기처럼 동작
-  --profile 종류         mt3000(기본) | dsa4(LAN 4포트+wan, 6GHz) | swconfig(스위치 칩) | single(포트 하나, 브리지 없음)
+  --profile 종류         mt3000(기본) | mt6000(LAN 5포트+eth1) | dsa4(LAN 4포트+wan, 6GHz) | swconfig(스위치 칩) | single(포트 하나, 브리지 없음)
 가짜 cgi-io: /cgi-bin/cgi-upload(파일 올리기), /cgi-bin/cgi-backup(백업 받기).
 가짜 LuCI: /cgi-bin/luci/... (로그인 쿠키 + 머리글/메뉴가 있는 서비스 화면. --no-packages면 서비스 메뉴 없음).
 가짜 펌웨어는 내용이 'NMMWRT-TEST-FW'로 시작하는 파일이면 '이 모델에 맞음'으로 검사된다.
@@ -50,7 +50,7 @@ def parse_args():
     p.add_argument("--session-timeout", type=int, default=None)
     p.add_argument("--acl", action="append", default=[])
     p.add_argument("--no-packages", action="store_true", help="ddns-scripts/sqm-scripts가 없는 공유기처럼")
-    p.add_argument("--profile", default="mt3000", choices=["mt3000", "dsa4", "swconfig", "single"],
+    p.add_argument("--profile", default="mt3000", choices=["mt3000", "mt6000", "dsa4", "swconfig", "single"],
                    help="흉내 낼 공유기 종류 (포트 구성/스위치 방식)")
     args = p.parse_args()
     if args.port_opt:

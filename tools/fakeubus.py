@@ -84,11 +84,13 @@ def S(type_, name=None, /, **opts):  # '/' : name, type 같은 UCI 옵션 이름
 
 # 공유기 종류(프로필): 포트 구성과 스위치 방식이 다른 OpenWrt 25 공유기들을 흉내 낸다.
 #   mt3000   GL-MT3000: DSA, LAN 포트 1개(lan1) + WAN(eth1), 2.4/5GHz
+#   mt6000   GL-MT6000: DSA, lan1(2.5G)~lan5 + WAN eth1(2.5G), 2.4/5GHz (OpenWrt 25.12의 02_network와 DTS 기준)
 #   dsa4     흔한 DSA 공유기: lan1~lan4 + wan, 2.4/5/6GHz
 #   swconfig 스위치 칩 공유기(ath79 등): switch0의 포트 1~4=LAN, 5=WAN, 0=CPU(eth0), eth0.1/eth0.2
 #   single   포트 하나(eth0)만 쓰고 브리지가 없는 기기, WAN은 eth1, 2.4GHz 하나
 PROFILES = {
     "mt3000": "GL.iNet GL-MT3000",
+    "mt6000": "GL.iNet GL-MT6000",
     "dsa4": "Example DSA Router (4 LAN)",
     "swconfig": "Example swconfig Router (ath79)",
     "single": "Example Single-port Router",
@@ -117,6 +119,13 @@ def profile_uci(profile):
         wifi = [_radio("radio0", "2g", "1", "platform/soc/wifi"), _ap("default_radio0", "radio0", "MyHome"),
                 _radio("radio1", "5g", "36", "platform/soc/wifi+1"), _ap("default_radio1", "radio1", "MyHome-5G"),
                 _radio("radio2", "6g", "37", "platform/soc/wifi+2"), _ap("default_radio2", "radio2", "MyHome-6G", "sae")]
+    elif profile == "mt6000":
+        net = [lo, gl, S("device", None, name="br-lan", type="bridge", ports=["lan1", "lan2", "lan3", "lan4", "lan5"]),
+               S("interface", "lan", device="br-lan", proto="static", ipaddr=lan_ip, ip6assign="60"),
+               S("interface", "wan", device="eth1", proto="dhcp"),
+               S("interface", "wan6", device="eth1", proto="dhcpv6")]
+        wifi = [_radio("radio0", "2g", "1", "platform/soc/18000000.wifi"), _ap("default_radio0", "radio0", "MyHome"),
+                _radio("radio1", "5g", "36", "platform/soc/18000000.wifi+1"), _ap("default_radio1", "radio1", "MyHome-5G")]
     elif profile == "swconfig":
         net = [lo, gl,
                S("switch", None, name="switch0", reset="1", enable_vlan="1"),
@@ -161,7 +170,8 @@ def profile_board(profile):
         return {"model": model, "network": {"lan": {"device": "eth1", "protocol": "static"},
                                             "wan": {"device": "eth0", "protocol": "dhcp"}},
                 "wlan": {"phy0": {}, "phy1": {}}}
-    lan_ports = {"dsa4": ["lan1", "lan2", "lan3", "lan4"], "single": None}.get(profile)
+    lan_ports = {"dsa4": ["lan1", "lan2", "lan3", "lan4"], "mt6000": ["lan1", "lan2", "lan3", "lan4", "lan5"],
+                 "single": None}.get(profile)
     wan = {"dsa4": "wan"}.get(profile, "eth1")
     lan = {"ports": lan_ports, "protocol": "static"} if lan_ports else {"device": "eth0", "protocol": "static"}
     return {"model": model, "network": {"lan": lan, "wan": {"device": wan, "protocol": "dhcp"}}}
@@ -979,14 +989,16 @@ class FakeUbus:
     def system_info(self, sid, args):
         now = self.clock()
         wave = (now % 60) / 60
-        total = 536870912
-        available = int(290e6 + 10e6 * wave)
+        big = self.profile == "mt6000"  # 메모리 1GB, 저장 공간 8GB eMMC
+        total = 1073741824 if big else 536870912
+        available = int((800e6 if big else 290e6) + 10e6 * wave)
         return {
             "localtime": int(time.time()), "uptime": self._uptime(),
             "load": [int((0.1 + 0.4 * wave) * 65536), 9830, 6553],
             "memory": {"total": total, "free": available - 64000000, "shared": 1200000,
                        "buffered": 4000000, "available": available, "cached": 60000000},
-            "root": {"total": 229376, "free": 210000, "used": 19376, "avail": 205000},
+            "root": {"total": 7340032, "free": 7300000, "used": 40032, "avail": 7280000} if big
+            else {"total": 229376, "free": 210000, "used": 19376, "avail": 205000},
             "tmp": {"total": 262144, "free": 260000, "used": 2144, "avail": 260000},
             "swap": {"total": 0, "free": 0},
         }
@@ -996,7 +1008,7 @@ class FakeUbus:
         return {
             "kernel": "6.6.73", "hostname": system.get("hostname", "OpenWrt"),
             "system": "ARMv8 Processor rev 4", "model": PROFILES[self.profile],
-            "board_name": "glinet,gl-mt3000" if self.profile == "mt3000" else "example," + self.profile,
+            "board_name": {"mt3000": "glinet,gl-mt3000", "mt6000": "glinet,gl-mt6000"}.get(self.profile, "example," + self.profile),
             "rootfs_type": "squashfs",
             "release": {"distribution": "OpenWrt", "version": "25.12.6", "revision": "r33311-981c978eff",
                         "target": "mediatek/filogic", "description": "OpenWrt 25.12.6 r33311-981c978eff"},
@@ -1125,7 +1137,11 @@ class FakeUbus:
                            "rx_packets": int(k * t * 9), "tx_packets": int(k * t * 4)}
         devs = {}
 
+        fast = {"mt6000": {"lan1"}}.get(self.profile, set())  # 2.5Gbps 포트
+
         def port(name, speed="1000F", k=1.0):
+            if name in fast:
+                speed = "2500F"
             devs.setdefault(name, {"external": False, "present": True, "type": "Network device", "up": True,
                                    "carrier": True, "speed": speed, "mtu": 1500,
                                    "macaddr": "94:83:c4:%02x:%02x:%02x" % (len(name), len(devs), 0x31),

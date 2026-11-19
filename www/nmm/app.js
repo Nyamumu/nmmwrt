@@ -133,7 +133,8 @@ async function readBoard() {
     const d = await ubus('file', 'read', { path: '/etc/board.json' });
     boardCache = JSON.parse(d.data || '{}');
   } catch {
-    boardCache = {};
+    // 로그인 전이나 세션이 끝난 뒤의 실패는 기억하지 않는다 (기억하면 로그인한 뒤에도 포트 이름이 장치 이름으로 남는다)
+    return {};
   }
   return boardCache;
 }

@@ -650,6 +650,19 @@ class Profiles(unittest.TestCase):
         self.assertIn("path: '/fw-ipset'", read("app.js"))
         self.assertIn("PAGES['/fw-ipset']", read("fwipset.js"))
 
+    def test_mt6000_profile(self):
+        """GL-MT6000: lan1(2.5G)~lan5 브리지와 WAN eth1(2.5G), 보드 이름, 데모가 이 프로필을 쓴다."""
+        fake, call, sid, clock = self.make("mt6000")
+        board = json.loads(call(sid, "file", "read", {"path": "/etc/board.json"})[1]["data"])
+        self.assertEqual(board["network"]["lan"]["ports"], ["lan1", "lan2", "lan3", "lan4", "lan5"])
+        self.assertEqual(board["network"]["wan"]["device"], "eth1")
+        self.assertEqual(call(sid, "system", "board")[1]["board_name"], "glinet,gl-mt6000")
+        devs = call(sid, "network.device", "status")[1]
+        self.assertEqual(devs["br-lan"]["bridge-members"], ["lan1", "lan2", "lan3", "lan4", "lan5"])
+        self.assertEqual((devs["lan1"]["speed"], devs["lan2"]["speed"], devs["eth1"]["speed"]), ("2500F", "1000F", "2500F"))
+        with open(os.path.join(BASE, "tools", "demo", "demo.js"), encoding="utf-8") as f:
+            self.assertIn("profile='mt6000'", f.read())
+
     def test_https_and_repo_keys_acl(self):
         """HTTPS 설정(uhttpd)과 저장소 공개 키(/etc/apk/keys)를 배포용 ACL로 다룰 수 있고, 그 밖의 파일은 지울 수 없다."""
         fake, call, sid, clock = self.make("mt3000")
@@ -682,6 +695,10 @@ class Profiles(unittest.TestCase):
             with open(os.path.join(out, "demo/demo.js"), encoding="utf-8") as f:
                 demo = f.read()
             self.assertNotIn("__V__", demo)
+            self.assertNotIn("__B__", demo)
+            build = mkdemo.build_id(mkdemo.read("VERSION").strip())
+            self.assertIn(f"app.js?v={build}", index)  # 내용이 바뀌면 캐시 값도 바뀐다
+            self.assertIn(f"DEMO_BUILD = '{build}'", demo)
             self.assertIn("fake.nmm_version = fake.nmm_latest = '%s'" % mkdemo.read("VERSION").strip(), demo)
             for name in ("app.js", "VERSION", ".nojekyll", "demo/demo.js", "demo/fakeubus.py", "demo/easyui.json"):
                 self.assertTrue(os.path.exists(os.path.join(out, name)), name)

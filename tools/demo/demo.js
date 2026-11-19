@@ -2,7 +2,7 @@
 // 화면 코드(www/nmm)는 그대로 쓰고, /ubus와 /cgi-bin 요청만 여기서 가로챈다. 설정은 메모리에만 있어 새로고침하면 처음으로 돌아간다.
 (function () {
   const PYODIDE_URL = 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
-  const DEMO_VERSION = '__V__';
+  const DEMO_BUILD = '__B__'; // 내용이 바뀔 때마다 달라지는 값 (브라우저 캐시 무효화)
   const realFetch = window.fetch.bind(window);
   const RealXHR = window.XMLHttpRequest;
   let api = null;
@@ -16,7 +16,7 @@ class DemoUbus(fakeubus.FakeUbus):
     # LuCI로 이동 메뉴는 보이고, LuCI 서비스가 필요한 추가 기능 메뉴는 숨긴다
     LUCI_MENU = {'luci-base.json': {}}
 
-fake = DemoUbus(acl_files=['/demo/easyui.json'], password='admin', apply_delay=1.5, log=lambda *a: None, profile='mt3000')
+fake = DemoUbus(acl_files=['/demo/easyui.json'], password='admin', apply_delay=1.5, log=lambda *a: None, profile='mt6000')
 # 데모는 항상 최신 버전이다 (NMMWrt 업데이트 카드에 새 버전이 뜨지 않게)
 fake.nmm_version = fake.nmm_latest = '__V__'
 
@@ -90,7 +90,7 @@ def demo_upload(sid, path, data):
 
   async function boot() {
     const text = async (path) => {
-      const res = await realFetch(`${path}?v=${DEMO_VERSION}`);
+      const res = await realFetch(`${path}?v=${DEMO_BUILD}`);
       if (!res.ok) throw new Error(path);
       return res.text();
     };

@@ -49,7 +49,7 @@ LuCI는 그대로 남으므로 새 UI에 문제가 있어도 `/cgi-bin/luci`로 
 
 공유기 없이: `python3 dev.py --mock` 실행 후 `http://127.0.0.1:8080/` 접속 (root / admin).
 가짜 ubus(`tools/fakeubus.py`)가 로그인, ACL, 설정 적용/되돌림, 재시작, 펌웨어 검사 등을 메모리에서 흉내 냅니다.
-`--profile dsa4`(LAN 4포트), `--profile swconfig`(스위치 칩), `--profile single`(포트 하나)로 다른 종류의 공유기도 흉내 냅니다.
+`--profile mt6000`(GL-MT6000, LAN 5포트), `--profile dsa4`(LAN 4포트), `--profile swconfig`(스위치 칩), `--profile single`(포트 하나)로 다른 종류의 공유기도 흉내 냅니다.
 옵션은 `python3 dev.py --help`를 보세요.
 
 파일을 고치고 새로고침만 하면 됩니다. 테스트: `python3 -m unittest discover -s tests`
