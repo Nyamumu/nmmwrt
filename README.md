@@ -1,5 +1,12 @@
 # nmmwrt
 NMMWrt - An easy web interface for OpenWrt configuration.
+
+> [!IMPORTANT]
+> ### NMMWrt is now wrtTIME
+>
+> This project has been renamed to **wrtTIME** and moved to **[Nyamumu/wrttime](https://github.com/Nyamumu/wrttime)**. This repository is no longer updated.
+>
+> **Already using NMMWrt?** Open the **NMMWrt 업데이트** card on the firmware upgrade page and update. Your router will switch to wrtTIME and get future updates from the new repository. Your settings are kept.
 > [!WARNING]
 > ### 100% AI-Generated Project 
 >
